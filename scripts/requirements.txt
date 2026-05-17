@@ -1,0 +1,4 @@
+motor==3.4.0
+pymongo==4.7.3
+openai==1.35.0
+python-dotenv==1.0.1
