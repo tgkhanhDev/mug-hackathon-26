@@ -42,7 +42,7 @@ class UserInDB(BaseModel):
 
     username: str
     email: str = ""
-    password_hash: str = Field(default="", description="Hashed password (for auth stage)")
+#    password_hash: str = Field(default="", description="Hashed password (for auth stage)")
     interest_tags: List[str]
     interest_vector: List[float] = Field(
         default_factory=list,
