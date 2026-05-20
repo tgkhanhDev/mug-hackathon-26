@@ -60,6 +60,24 @@ class Settings(BaseSettings):
     # ── Server ─────────────────────────────────────────────────
     PORT: int = Field(default=8033, description="Server port")
 
+    # ── AWS S3 ─────────────────────────────────────────────────
+    AWS_ACCESS_KEY_ID: str = Field(
+        default="", 
+        description="AWS Access Key ID for S3 upload"
+    )
+    AWS_SECRET_ACCESS_KEY: str = Field(
+        default="", 
+        description="AWS Secret Access Key"
+    )
+    AWS_REGION: str = Field(
+        default="ap-southeast-1", 
+        description="AWS Region (e.g. ap-southeast-1)"
+    )
+    AWS_BUCKET_NAME: str = Field(
+        default="", 
+        description="AWS S3 Bucket Name"
+    )
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",

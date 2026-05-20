@@ -23,7 +23,6 @@ from app.controllers import video_controller
 from app.controllers import user_controller
 from app.controllers import auth_controller
 from app.controllers import scheduler_controller
-from app.controllers import interaction_controller
 
 # ── Logging Setup ──────────────────────────────────────────────
 logging.basicConfig(
@@ -94,7 +93,6 @@ app.include_router(video_controller.router, prefix=API_PREFIX)
 app.include_router(user_controller.router, prefix=API_PREFIX)
 app.include_router(auth_controller.router, prefix=API_PREFIX)
 app.include_router(scheduler_controller.router, prefix=API_PREFIX)
-app.include_router(interaction_controller.router, prefix=API_PREFIX)
 
 
 # ── Health Check ───────────────────────────────────────────────
