@@ -1,5 +1,8 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { Heart, MessageCircle, Share2, Bookmark, Music } from 'lucide-react';
+import { useInView } from 'react-intersection-observer';
+import { useVideoStats } from '../hooks/useVideoStats';
+import { sendInteraction, sendBehaviorLog } from '../api/client';
 
 interface VideoCardProps {
   videoUrl: string;
@@ -11,6 +14,8 @@ interface VideoCardProps {
   shares: number;
   bookmarks: number;
   isActive: boolean;
+  videoId: string;
+  topic: string;
 }
 
 export const VideoCard: React.FC<VideoCardProps> = ({
@@ -22,11 +27,34 @@ export const VideoCard: React.FC<VideoCardProps> = ({
   comments,
   shares,
   bookmarks,
-  isActive
+  isActive,
+  videoId,
+  topic
 }) => {
+  const { ref: inViewRef, inView } = useInView({ threshold: 0.7 });
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLiked, setIsLiked] = useState(false);
+  const [hasViewed, setHasViewed] = useState(false);
+
+  // Combine refs (intersection observer + video element)
+  const setRefs = (node: HTMLVideoElement) => {
+    videoRef.current = node;
+    inViewRef(node);
+  };
+
+  const realTimeStats = useVideoStats(
+    videoId, 
+    { like_count: likes, view_count: 0, comment_count: comments }, 
+    inView
+  );
+
+  useEffect(() => {
+    if (inView && !hasViewed) {
+      setHasViewed(true);
+      sendBehaviorLog(videoId, topic);
+    }
+  }, [inView, hasViewed, videoId, topic]);
 
   useEffect(() => {
     if (isActive) {
@@ -40,6 +68,18 @@ export const VideoCard: React.FC<VideoCardProps> = ({
       setIsPlaying(false);
     }
   }, [isActive]);
+
+  const handleLike = () => {
+    const newLikedState = !isLiked;
+    setIsLiked(newLikedState);
+    if (newLikedState) {
+      sendInteraction(videoId, 'like', 0.8);
+    }
+  };
+
+  const handleComment = () => {
+    sendInteraction(videoId, 'comment', 0.5);
+  };
 
   const togglePlay = () => {
     if (isPlaying) {
@@ -61,7 +101,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
     <div className="relative w-full h-full bg-zinc-900 snap-start shrink-0">
       {/* Video element */}
       <video
-        ref={videoRef}
+        ref={setRefs}
         src={videoUrl}
         className="w-full h-full object-cover"
         loop
@@ -87,18 +127,18 @@ export const VideoCard: React.FC<VideoCardProps> = ({
           <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`} alt="avatar" className="w-full h-full object-cover" />
         </div>
         
-        <button className="flex flex-col items-center gap-1 group" onClick={() => setIsLiked(!isLiked)}>
+        <button className="flex flex-col items-center gap-1 group" onClick={handleLike}>
           <div className="p-2 rounded-full group-hover:bg-white/10 transition-colors">
             <Heart size={32} className={isLiked ? 'fill-red-500 text-red-500' : 'text-white'} />
           </div>
-          <span className="text-white text-xs font-semibold">{formatNumber(isLiked ? likes + 1 : likes)}</span>
+          <span className="text-white text-xs font-semibold">{formatNumber(realTimeStats.like_count)}</span>
         </button>
 
-        <button className="flex flex-col items-center gap-1 group">
+        <button className="flex flex-col items-center gap-1 group" onClick={handleComment}>
           <div className="p-2 rounded-full group-hover:bg-white/10 transition-colors">
             <MessageCircle size={32} className="text-white" />
           </div>
-          <span className="text-white text-xs font-semibold">{formatNumber(comments)}</span>
+          <span className="text-white text-xs font-semibold">{formatNumber(realTimeStats.comment_count)}</span>
         </button>
 
         <button className="flex flex-col items-center gap-1 group">

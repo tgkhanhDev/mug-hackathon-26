@@ -11,6 +11,7 @@ interface VideoData {
   comments: number;
   shares: number;
   bookmarks: number;
+  tags?: string[];
 }
 
 interface FeedProps {
@@ -52,6 +53,8 @@ export const Feed: React.FC<FeedProps> = ({ videos }) => {
           shares={video.shares}
           bookmarks={video.bookmarks}
           isActive={index === activeIndex}
+          videoId={video.id}
+          topic={video.tags && video.tags.length > 0 ? video.tags[0] : 'general'}
         />
       ))}
     </div>

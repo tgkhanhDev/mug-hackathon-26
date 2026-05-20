@@ -3,6 +3,7 @@ import { Feed } from './components/Feed';
 import { BottomNav } from './components/BottomNav';
 import { AuthPopup } from './components/AuthPopup';
 import { Sparkles, Brain, Leaf, ShieldAlert } from 'lucide-react';
+import { useTrendingVideos } from './api/client';
 
 // Mock vertical-clipped video dataset
 const MOCK_VIDEOS = [
@@ -65,7 +66,22 @@ const MOCK_VIDEOS = [
 
 function App() {
   const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const { videos: apiVideos } = useTrendingVideos();
   
+  // Map API videos to the format expected by Feed
+  const feedVideos = apiVideos && apiVideos.length > 0 ? apiVideos.map(v => ({
+    id: v.id,
+    videoUrl: v.url,
+    username: v.creator_id,
+    description: v.description,
+    songName: 'Original Sound',
+    likes: v.like_count,
+    comments: v.comment_count,
+    shares: 0,
+    bookmarks: 0,
+    tags: v.tags
+  })) : MOCK_VIDEOS;
+
   // States to simulate Phase 2 & 3 for presentation & demo purposes
   const [fatigueScore, setFatigueScore] = useState(25);
   const [isMindfulActive, setIsMindfulActive] = useState(false);
@@ -186,12 +202,11 @@ function App() {
             videos={
               isMindfulActive 
                 ? [
-                    // Mindful Injection: Prioritize tranquil and calming videos, filter out Fast-cut or dark humor
-                    MOCK_VIDEOS[2], // Nature heals
-                    MOCK_VIDEOS[4], // Mindful piano
-                    MOCK_VIDEOS[0], // Dev life (slightly lighter than football edits)
+                    feedVideos.length > 2 ? feedVideos[2] : feedVideos[0], 
+                    feedVideos.length > 4 ? feedVideos[4] : feedVideos[0], 
+                    feedVideos[0], 
                   ]
-                : MOCK_VIDEOS // Normal personalized feed
+                : feedVideos // Normal personalized feed
             } 
           />
         </div>
