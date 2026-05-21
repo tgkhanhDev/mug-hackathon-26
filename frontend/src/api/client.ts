@@ -4,7 +4,7 @@ export const API_URL = 'http://localhost:8000/api/v1';
 export const WS_URL = 'ws://localhost:8000/ws/stats';
 
 // A mock user ID and session ID for demo purposes
-export const MOCK_USER_ID = '664f3316e11b333444455555';
+export const MOCK_USER_ID = '6a0bdf9bc0d0a93bff883daa';
 export const MOCK_SESSION_ID = '664f3316e11b333444455556';
 
 export const fetcher = (url: string) => fetch(url).then((res) => res.json());
