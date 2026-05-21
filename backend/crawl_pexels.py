@@ -5,7 +5,7 @@ Downloads high-quality videos from Pexels and registers them in the MongoDB data
 using the app's Video model, repositories, and services layer.
 """
 
-#
+# python crawl_pexels.py --query nature --category nature --intensity low --limit 100
 
 import os
 import sys

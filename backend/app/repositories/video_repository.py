@@ -17,20 +17,43 @@ class VideoRepository(BaseRepository):
     async def find_by_tags(
         self, tags: List[str], limit: int = 20
     ) -> List[Dict[str, Any]]:
-        """Find videos that match any of the given tags."""
-        return await self.find_many(
-            filter={"tags": {"$in": tags}},
-            limit=limit,
-            sort=[("trending_score", -1)],
-        )
+        """Find videos that match any of the given tags sorted by dynamic trending_score."""
+        pipeline = [
+            {"$match": {"tags": {"$in": tags}}},
+            {
+                "$addFields": {
+                    "trending_score": {
+                        "$add": [
+                            {"$multiply": [{"$ifNull": ["$view_count", 0]}, 1]},
+                            {"$multiply": [{"$ifNull": ["$like_count", 0]}, 3]},
+                            {"$multiply": [{"$ifNull": ["$comment_count", 0]}, 5]}
+                        ]
+                    }
+                }
+            },
+            {"$sort": {"trending_score": -1}},
+            {"$limit": limit}
+        ]
+        return await self.aggregate(pipeline)
 
     async def find_trending(self, limit: int = 10) -> List[Dict[str, Any]]:
-        """Get top trending videos sorted by trending_score desc."""
-        return await self.find_many(
-            filter={},
-            limit=limit,
-            sort=[("trending_score", -1)],
-        )
+        """Get top trending videos sorted by dynamic trending_score desc."""
+        pipeline = [
+            {
+                "$addFields": {
+                    "trending_score": {
+                        "$add": [
+                            {"$multiply": [{"$ifNull": ["$view_count", 0]}, 1]},
+                            {"$multiply": [{"$ifNull": ["$like_count", 0]}, 3]},
+                            {"$multiply": [{"$ifNull": ["$comment_count", 0]}, 5]}
+                        ]
+                    }
+                }
+            },
+            {"$sort": {"trending_score": -1}},
+            {"$limit": limit}
+        ]
+        return await self.aggregate(pipeline)
 
     async def find_without_embedding(self, limit: int = 100) -> List[Dict[str, Any]]:
         """Find videos that don't have an embedding yet (for scheduler job)."""
@@ -53,9 +76,13 @@ class VideoRepository(BaseRepository):
         limit: int = 10,
         num_candidates: int = 100,
         filter_stage: Optional[Dict[str, Any]] = None,
+        search_weight: float = 100.0,
+        trending_weight: float = 1.0,
     ) -> List[Dict[str, Any]]:
         """
-        Perform $vectorSearch on the videos collection.
+        Perform $vectorSearch on the videos collection, calculating a combined
+        total_score (search_score * search_weight + trending_score * trending_weight)
+        and sorting by it.
         Requires a Vector Search Index named 'video_embedding_index' on Atlas.
         """
         pipeline = [
@@ -71,8 +98,30 @@ class VideoRepository(BaseRepository):
             {
                 "$addFields": {
                     "search_score": {"$meta": "vectorSearchScore"},
+                    "trending_score": {
+                        "$add": [
+                            {"$multiply": [{"$ifNull": ["$view_count", 0]}, 1]},
+                            {"$multiply": [{"$ifNull": ["$like_count", 0]}, 3]},
+                            {"$multiply": [{"$ifNull": ["$comment_count", 0]}, 5]}
+                        ]
+                    }
                 }
             },
+            {
+                "$addFields": {
+                    "total_score": {
+                        "$add": [
+                            {"$multiply": ["$search_score", search_weight]},
+                            {"$multiply": ["$trending_score", trending_weight]}
+                        ]
+                    }
+                }
+            },
+            {
+                "$sort": {
+                    "total_score": -1
+                }
+            }
         ]
 
         # Optional post-filter (e.g., intensity_level filtering for fatigue)

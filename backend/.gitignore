@@ -149,3 +149,4 @@ cython_debug/
 *.swo
 .DS_Store
 Thumbs.db
+videos/

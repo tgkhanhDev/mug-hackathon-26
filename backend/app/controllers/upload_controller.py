@@ -9,7 +9,7 @@ import uuid
 import os
 import boto3
 from fastapi import APIRouter, UploadFile, File, HTTPException, status
-from app.config import settings
+from app.utils.s3 import upload_to_s3
 
 router = APIRouter(prefix="/upload", tags=["Upload"])
 logger = logging.getLogger(__name__)
@@ -19,37 +19,13 @@ logger = logging.getLogger(__name__)
     "/",
     status_code=status.HTTP_200_OK,
     summary="Upload a file to AWS S3",
-    description="Uploads a file to AWS S3. Currently mocked until AWS credentials are provided in .env.",
+    description="Uploads a file to AWS S3.",
 )
 async def upload_file(file: UploadFile = File(...)):
-    """POST /api/v1/upload/ — Upload file to AWS."""
+    """POST /api/v1/upload/ — Upload file to AWS S3."""
     try:
-        # Initialize boto3 client
-        s3_client = boto3.client(
-            's3',
-            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-            region_name=settings.AWS_REGION
-        )
-
-        file_extension = file.filename.split('.')[-1] if '.' in file.filename else ''
-        unique_filename = f"{uuid.uuid4()}.{file_extension}"
-        
-        # Read file content
-        file_content = await file.read()
-        
-        logger.info(f"Uploading file {unique_filename} to AWS S3 bucket {settings.AWS_BUCKET_NAME}...")
-        
-        # Actual upload logic
-        s3_client.put_object(
-            Bucket=settings.AWS_BUCKET_NAME,
-            Key=unique_filename,
-            Body=file_content,
-            ContentType=file.content_type
-        )
-        
-        # Real URL
-        file_url = f"https://{settings.AWS_BUCKET_NAME}.s3.{settings.AWS_REGION}.amazonaws.com/{unique_filename}"
+        file_url = await upload_to_s3(file)
+        unique_filename = file_url.split("/")[-1]
         
         return {
             "message": "File uploaded successfully",
@@ -60,6 +36,8 @@ async def upload_file(file: UploadFile = File(...)):
         
     except Exception as e:
         logger.error(f"Error uploading file: {e}")
+        if isinstance(e, HTTPException):
+            raise e
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to upload file to AWS"
