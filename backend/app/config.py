@@ -82,12 +82,20 @@ class Settings(BaseSettings):
         description="AWS S3 Bucket Name"
     )
 
+    # ── Pexels Crawler ─────────────────────────────────────────
+    PEXELS_API_KEY: str = Field(
+        default="",
+        description="Pexels API Key for crawler"
+    )
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
         "case_sensitive": True,
+        "extra": "ignore",
     }
 
 
 # Singleton instance
 settings = Settings()
+

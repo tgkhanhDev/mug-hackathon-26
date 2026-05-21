@@ -12,7 +12,7 @@ import sys
 import argparse
 import asyncio
 import logging
-from typing import List
+from typing import List, Dict
 import httpx
 from dotenv import load_dotenv
 
@@ -33,6 +33,19 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from app.repositories.database import connect_db, disconnect_db
 from app.services.video_service import VideoService
 from app.models.video import VideoCreate, CATEGORY_ENUM, INTENSITY_ENUM
+
+
+# Predefined list of search configurations covering multiple categories
+PRESET_TASKS = [
+    {"query": "nature", "category": "nature", "intensity_level": "low"},
+    {"query": "meditation", "category": "calming", "intensity_level": "low"},
+    {"query": "cooking", "category": "cooking", "intensity_level": "medium"},
+    {"query": "fitness", "category": "sports", "intensity_level": "high"},
+    {"query": "gaming", "category": "gaming", "intensity_level": "high"},
+    {"query": "programming", "category": "education", "intensity_level": "medium"},
+    {"query": "travel", "category": "lifestyle", "intensity_level": "medium"},
+    {"query": "dance", "category": "entertainment", "intensity_level": "high"},
+]
 
 
 def extract_title_from_url(url: str, query: str, photographer: str) -> str:
@@ -78,17 +91,15 @@ def generate_tags(query: str, title: str) -> List[str]:
 
 
 async def crawl_pexels(
-    query: str,
-    category: str,
-    intensity_level: str,
+    tasks: List[Dict[str, str]],
     limit: int,
     creator_id: str,
     api_key: str,
     db_url_mode: str,
 ):
     """
-    Crawl videos from Pexels, download them locally, and save their metadata
-    and embeddings into MongoDB.
+    Crawl videos from Pexels for a list of tasks, download them locally,
+    and save their metadata and embeddings into MongoDB.
     """
     if not api_key:
         logger.error(
@@ -104,125 +115,128 @@ async def crawl_pexels(
         "Authorization": api_key
     }
     
-    # Call Pexels Video Search API
-    url = f"https://api.pexels.com/videos/search?query={query}&per_page={limit}"
-    
+    # Initialize database connection once for all tasks
+    logger.info("🔌 Connecting to MongoDB...")
+    await connect_db()
+    video_service = VideoService()
+
     async with httpx.AsyncClient() as client:
-        logger.info(f"🔍 Searching Pexels for: '{query}' (limit: {limit})...")
         try:
-            response = await client.get(url, headers=headers)
-            response.raise_for_status()
-        except Exception as e:
-            logger.error(f"❌ Failed to query Pexels API: {e}")
-            sys.exit(1)
-
-        data = response.json()
-        videos = data.get("videos", [])
-        logger.info(f"🎥 Found {len(videos)} videos from Pexels API.")
-
-        if not videos:
-            logger.warning("No videos found matching your query.")
-            return
-
-        # Initialize database connection
-        logger.info("🔌 Connecting to MongoDB...")
-        await connect_db()
-        video_service = VideoService()
-
-        try:
-            for index, video in enumerate(videos):
-                video_id = video.get("id")
-                video_url_page = video.get("url", "")
-                photographer = video.get("user", {}).get("name", "Unknown Photographer")
-
-                logger.info("-" * 50)
-                logger.info(f"⏳ Processing video {index + 1}/{len(videos)} (ID: {video_id})")
-
-                # Extract title
-                title = extract_title_from_url(video_url_page, query, photographer)
-                # Ensure title doesn't exceed 500 chars
-                title = title[:500]
-
-                # Construct description
-                description = f"High-quality {query} video shot by {photographer} on Pexels."
-                description = description[:2000]
-
-                # Find best quality MP4 file
-                video_files = video.get("video_files", [])
-                if not video_files:
-                    logger.warning(f"⚠️ No video files found for video ID {video_id}. Skipping.")
-                    continue
-
-                # Find best quality MP4 file
-                video_files = video.get("video_files", [])
+            for task in tasks:
+                query = task["query"]
+                category = task["category"]
+                intensity_level = task["intensity_level"]
                 
-                # Filter specifically for video/mp4 files
-                mp4_files = [
-                    f for f in video_files 
-                    if f.get("file_type") == "video/mp4" or "mp4" in f.get("link", "").lower()
-                ]
+                logger.info("=" * 60)
+                logger.info(f"🚀 Crawling Topic: '{query}' -> Category: '{category}' (Intensity: {intensity_level})")
+                logger.info("=" * 60)
                 
-                if not mp4_files:
-                    logger.warning(f"⚠️ No MP4 files found for video ID {video_id}. Skipping.")
-                    continue
-
-                # Sort by resolution/width to get the best quality
-                best_video = max(mp4_files, key=lambda x: x.get("width") or 0)
-                download_link = best_video.get("link")
-                if not download_link:
-                    logger.warning(f"⚠️ No download link for video ID {video_id}. Skipping.")
-                    continue
-
-                # Use a unique file path based on the Pexels video ID to prevent overwriting
-                file_path = f"videos/video_{video_id}.mp4"
-
-                # Download video file
-                logger.info(f"📥 Downloading video file: {download_link}")
+                # Call Pexels Video Search API
+                url = f"https://api.pexels.com/videos/search?query={query}&per_page={limit}"
+                
                 try:
-                    # Setting a longer timeout for downloading large files
-                    video_res = await client.get(download_link, follow_redirects=True, timeout=60.0)
-                    video_res.raise_for_status()
+                    response = await client.get(url, headers=headers)
+                    response.raise_for_status()
+                except Exception as e:
+                    logger.error(f"❌ Failed to query Pexels API for '{query}': {e}")
+                    continue
+
+                data = response.json()
+                videos = data.get("videos", [])
+                logger.info(f"🎥 Found {len(videos)} videos for '{query}' from Pexels API.")
+
+                if not videos:
+                    logger.warning(f"No videos found matching query: {query}")
+                    continue
+
+                for index, video in enumerate(videos):
+                    video_id = video.get("id")
+                    video_url_page = video.get("url", "")
+                    photographer = video.get("user", {}).get("name", "Unknown Photographer")
+
+                    logger.info("-" * 50)
+                    logger.info(f"⏳ Processing video {index + 1}/{len(videos)} of query '{query}' (ID: {video_id})")
+
+                    # Extract title
+                    title = extract_title_from_url(video_url_page, query, photographer)
+                    title = title[:500]
+
+                    # Construct description
+                    description = f"High-quality {query} video shot by {photographer} on Pexels."
+                    description = description[:2000]
+
+                    # Find best quality MP4 file
+                    video_files = video.get("video_files", [])
+                    if not video_files:
+                        logger.warning(f"⚠️ No video files found for video ID {video_id}. Skipping.")
+                        continue
+
+                    # Filter specifically for video/mp4 files
+                    mp4_files = [
+                        f for f in video_files 
+                        if f.get("file_type") == "video/mp4" or "mp4" in f.get("link", "").lower()
+                    ]
                     
-                    with open(file_path, "wb") as f:
-                        f.write(video_res.content)
-                    logger.info(f"💾 Saved video locally to: {file_path}")
-                except Exception as e:
-                    logger.error(f"❌ Failed to download or save video {video_id}: {e}")
-                    continue
+                    if not mp4_files:
+                        logger.warning(f"⚠️ No MP4 files found for video ID {video_id}. Skipping.")
+                        continue
 
-                # Prepare metadata tags and validation limits
-                tags = generate_tags(query, title)
-                thumbnail_url = video.get("image", "")
+                    # Sort by resolution/width to get the best quality
+                    best_video = max(mp4_files, key=lambda x: x.get("width") or 0)
+                    download_link = best_video.get("link")
+                    if not download_link:
+                        logger.warning(f"⚠️ No download link for video ID {video_id}. Skipping.")
+                        continue
 
-                # Determine which URL to save in the database
-                db_url = download_link if db_url_mode == "online" else file_path
+                    # Use a unique file path based on the Pexels video ID to prevent overwriting
+                    file_path = f"videos/video_{video_id}.mp4"
 
-                # Instantiate the Pydantic create schema
-                video_dto = VideoCreate(
-                    title=title,
-                    description=description,
-                    url=db_url,
-                    thumbnail_url=thumbnail_url,
-                    tags=tags,
-                    category=category,
-                    intensity_level=intensity_level,
-                    creator_id=creator_id,
-                    view_count=0,
-                    like_count=0,
-                    comment_count=0,
-                )
+                    # Download video file
+                    logger.info(f"📥 Downloading video file: {download_link}")
+                    try:
+                        video_res = await client.get(download_link, follow_redirects=True, timeout=60.0)
+                        video_res.raise_for_status()
+                        
+                        with open(file_path, "wb") as f:
+                            f.write(video_res.content)
+                        logger.info(f"💾 Saved video locally to: {file_path}")
+                    except Exception as e:
+                        logger.error(f"❌ Failed to download or save video {video_id}: {e}")
+                        continue
 
-                # Save video using the Service Layer (generates embeddings and trending scores)
-                logger.info(f"📝 Registering video in MongoDB (URL saved: {db_url})...")
-                try:
-                    saved_video = await video_service.create_video(video_dto)
-                    logger.info(f"✅ Success! Saved to DB with ID: {saved_video.id}")
-                except Exception as e:
-                    logger.error(f"❌ Failed to save video metadata to DB: {e}")
-                    # Clean up downloaded file on database save failure
-                    if os.path.exists(file_path):
-                        os.remove(file_path)
-                        logger.info("🗑️ Cleaned up downloaded video file due to DB failure.")
+                    # Prepare metadata tags and validation limits
+                    tags = generate_tags(query, title)
+                    thumbnail_url = video.get("image", "")
+
+                    # Determine which URL to save in the database
+                    db_url = download_link if db_url_mode == "online" else file_path
+
+                    # Instantiate the Pydantic create schema
+                    video_dto = VideoCreate(
+                        title=title,
+                        description=description,
+                        url=db_url,
+                        thumbnail_url=thumbnail_url,
+                        tags=tags,
+                        category=category,
+                        intensity_level=intensity_level,
+                        creator_id=creator_id,
+                        view_count=0,
+                        like_count=0,
+                        comment_count=0,
+                    )
+
+                    # Save video using the Service Layer (generates embeddings and trending scores)
+                    logger.info(f"📝 Registering video in MongoDB (URL saved: {db_url})...")
+                    try:
+                        saved_video = await video_service.create_video(video_dto)
+                        logger.info(f"✅ Success! Saved to DB with ID: {saved_video.id}")
+                    except Exception as e:
+                        logger.error(f"❌ Failed to save video metadata to DB: {e}")
+                        # Clean up downloaded file on database save failure
+                        if os.path.exists(file_path):
+                            os.remove(file_path)
+                            logger.info("🗑️ Cleaned up downloaded video file due to DB failure.")
         finally:
             logger.info("🔌 Disconnecting MongoDB...")
             await disconnect_db()
@@ -235,28 +249,26 @@ def main():
     parser.add_argument(
         "--query",
         type=str,
-        default="nature",
-        help="Search query for Pexels videos (default: 'nature')"
+        default="all",
+        help="Search query for Pexels videos. Use 'all' for preset topics, or comma-separated values (e.g. 'cooking,gaming') for batch crawling."
     )
     parser.add_argument(
         "--category",
         type=str,
-        choices=CATEGORY_ENUM,
         default="nature",
-        help=f"Category field for the video model. Must be one of: {CATEGORY_ENUM}"
+        help=f"Category field for the video model. Can be comma-separated for batch crawling (default: 'nature'). Choices: {', '.join(CATEGORY_ENUM)}"
     )
     parser.add_argument(
         "--intensity",
         type=str,
-        choices=INTENSITY_ENUM,
         default="low",
-        help=f"Intensity level for the video. Must be one of: {INTENSITY_ENUM}"
+        help=f"Intensity level for the video. Can be comma-separated for batch crawling (default: 'low'). Choices: {', '.join(INTENSITY_ENUM)}"
     )
     parser.add_argument(
         "--limit",
         type=int,
         default=5,
-        help="Number of videos to fetch and save (default: 5)"
+        help="Number of videos to fetch and save per topic (default: 5)"
     )
     parser.add_argument(
         "--creator-id",
@@ -280,11 +292,36 @@ def main():
 
     args = parser.parse_args()
 
+    # Generate tasks list
+    tasks = []
+    if args.query.lower() == "all":
+        tasks = PRESET_TASKS
+    elif "," in args.query or "," in args.category or "," in args.intensity:
+        queries = [q.strip() for q in args.query.split(",")]
+        categories = [c.strip() for c in args.category.split(",")]
+        if len(categories) < len(queries):
+            categories = categories + [categories[-1]] * (len(queries) - len(categories))
+        intensities = [i.strip() for i in args.intensity.split(",")]
+        if len(intensities) < len(queries):
+            intensities = intensities + [intensities[-1]] * (len(queries) - len(intensities))
+        for q, c, i in zip(queries, categories, intensities):
+            tasks.append({"query": q, "category": c, "intensity_level": i})
+    else:
+        tasks = [{"query": args.query, "category": args.category, "intensity_level": args.intensity}]
+
+
+    # Validate categories and intensities in tasks
+    for task in tasks:
+        if task["category"] not in CATEGORY_ENUM:
+            logger.error(f"❌ Invalid category '{task['category']}'. Must be one of: {CATEGORY_ENUM}")
+            sys.exit(1)
+        if task["intensity_level"] not in INTENSITY_ENUM:
+            logger.error(f"❌ Invalid intensity level '{task['intensity_level']}'. Must be one of: {INTENSITY_ENUM}")
+            sys.exit(1)
+
     asyncio.run(
         crawl_pexels(
-            query=args.query,
-            category=args.category,
-            intensity_level=args.intensity,
+            tasks=tasks,
             limit=args.limit,
             creator_id=args.creator_id,
             api_key=args.api_key,
@@ -295,3 +332,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
