@@ -1,0 +1,25 @@
+MONGODB_URI=mongodb+srv://dev:gotouchgrass@cluster0.dzjbtvv.mongodb.net/?appName=Cluster0
+DATABASE_NAME=gotouchgrass
+
+# OpenAI Embedding
+OPENAI_API_KEY=
+EMBEDDING_MODEL=text-embedding-3-small
+
+# JWT Auth
+JWT_SECRET_KEY=your-super-secret-key-change-in-production
+JWT_ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+REFRESH_TOKEN_EXPIRE_DAYS=7
+
+# Embedding Scheduler
+EMBEDDING_SCHEDULE_INTERVAL_MINUTES=60
+
+# Server
+PORT=8033
+
+# AWS S3
+AWS_ACCESS_KEY_ID="AKIA47CRXJTI335T7ZHJ"
+AWS_SECRET_ACCESS_KEY="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"
+AWS_REGION="ap-southeast-1"
+AWS_BUCKET_NAME="bshowsell-public"
+
