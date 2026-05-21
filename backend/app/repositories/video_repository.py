@@ -129,3 +129,28 @@ class VideoRepository(BaseRepository):
             pipeline.insert(1, {"$match": filter_stage})
 
         return await self.aggregate(pipeline)
+
+    async def increment_counters(
+        self, video_id: str, views: int = 0, likes: int = 0, comments: int = 0
+    ) -> bool:
+        """Increment view, like, and comment counters atomically on a video."""
+        from bson import ObjectId
+        if not ObjectId.is_valid(video_id):
+            return False
+        
+        inc_data = {}
+        if views > 0:
+            inc_data["view_count"] = views
+        if likes > 0:
+            inc_data["like_count"] = likes
+        if comments > 0:
+            inc_data["comment_count"] = comments
+
+        if not inc_data:
+            return False
+
+        result = await self.collection.update_one(
+            {"_id": ObjectId(video_id)},
+            {"$inc": inc_data}
+        )
+        return result.modified_count > 0

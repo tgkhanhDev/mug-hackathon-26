@@ -24,6 +24,7 @@ from app.controllers import user_controller
 from app.controllers import auth_controller
 from app.controllers import scheduler_controller
 from app.controllers import upload_controller
+from app.controllers import feed_controller
 from app.controllers import interaction_controller
 
 # ── Logging Setup ──────────────────────────────────────────────
@@ -96,6 +97,8 @@ app.include_router(user_controller.router, prefix=API_PREFIX)
 app.include_router(auth_controller.router, prefix=API_PREFIX)
 app.include_router(scheduler_controller.router, prefix=API_PREFIX)
 app.include_router(upload_controller.router, prefix=API_PREFIX)
+app.include_router(interaction_controller.router, prefix=API_PREFIX)
+app.include_router(feed_controller.router, prefix=API_PREFIX)
 app.include_router(interaction_controller.router, prefix=API_PREFIX)
 
 
