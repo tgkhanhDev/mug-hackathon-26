@@ -6,7 +6,6 @@
 
 ---
 
-## 📊 ERD Diagram
 
 ```mermaid
 erDiagram
@@ -239,17 +238,168 @@ feed_sessions  → chỉ track fatigue/wellbeing của phiên lướt, không đ
 | `user_id` | `ObjectId` | ✅ | — | Ref → `users._id` |
 | `video_id` | `ObjectId` | ✅ | — | Ref → `videos._id` |
 | `session_id` | `ObjectId` | ✅ | — | Ref → `feed_sessions._id` |
-| `type` | `string` | ✅ | — | Enum: `like`, `skip`, `comment`, `replay`, `share`. Trọng số update vector: `like=1.0`, `replay=0.8`, `comment=0.6`, `skip=-0.3` |
-| `watch_duration` | `float` | ✅ | `0.0` | Thời gian xem (giây). Ví dụ: `28.5` |
-| `watch_percentage` | `float` | ✅ | `0.0` | Tỉ lệ đã xem từ 0.0 → 1.0. `> 0.8` = xem gần hết = tín hiệu tích cực mạnh |
-| `swipe_speed` | `float` | ✅ | `0.0` | Tốc độ vuốt (px/giây) khi rời khỏi video. `0.0` = chưa vuốt |
-| `replay_count` | `int` | ✅ | `0` | Số lần xem lại trong cùng 1 lần view |
+| `type` | `string` | ✅ | — | Enum: `like`, `skip`, `comment`, `replay`, `share`, `passive_view`. **Chỉ 1 type per document.** Trọng số: `like=1.0`, `replay=0.8`, `comment=0.6`, `share=0.5`, `passive_view=0.2`, `skip=-0.3` |
+| `watch_duration` | `float` | ✅ | `0.0` | Thời gian xem (giây). Ví dụ: `28.5`. Ghi lại để track user engagement nhưng **KHÔNG dùng để update vector** |
+| `watch_percentage` | `float` | ✅ | `0.0` | Tỉ lệ đã xem từ 0.0 → 1.0. `> 0.8` = xem gần hết = tín hiệu tích cực mạnh. **KHÔNG dùng để update vector** |
+| `swipe_speed` | `float` | ✅ | `0.0` | Tốc độ vuốt (px/giây) khi rời khỏi video. `0.0` = chưa vuốt. **KHÔNG dùng để update vector**, chỉ track hành vi |
+| `replay_count` | `int` | ✅ | `0` | Số lần xem lại trong cùng 1 lần view. Tính vào type="replay" weight=0.8 khi user bấm replay button |
 | `timestamp` | `datetime` | auto | `now()` | Thời điểm xảy ra event |
 
-**JSON Example:**
+### 🔑 Cách tính Weight - Rất Quan Trọng
+
+**Quy tắc:**
+- **1 Interaction = 1 Document = 1 Type = 1 Weight**
+- Không cộng cộp weights
+- Không lấy cao nhất
+
+**Ví dụ:**
+
+| Hành động User | Type | Weight | Ghi chú |
+|---|---|---|---|
+| User LIKE video | `like` | **1.0** | ✅ Mạnh nhất - tín hiệu tích cực |
+| User REPLAY video 3 lần | `replay` | **0.8** | ✅ Xem lại = like nhưng yếu hơn |
+| User COMMENT | `comment` | **0.6** | 🟡 Tương tác trung bình |
+| User SHARE | `share` | **0.5** | 🟡 Tạo dấu hiệu tích cực nhưng yếu |
+| User SKIP video | `skip` | **-0.3** | ❌ Tiêu cực - user không thích |
+| User xem 80%+ (không click) | `passive_view` | **0.2** | 🟡 Implicit: có thể thích (tín hiệu yếu) |
+| User xem <50% (không click) | ❌ KHÔNG tạo interaction | — | ⚠️ Chỉ tạo behavior_log, KHÔNG update vector |
+
+**Câu hỏi của bạn 1: "Vừa xem vừa like = 1.6 hay 1.0?"**
+- ❌ SAI: Không phải 1.6 (không cộng)
+- ✅ ĐÚNG: **1.0 (chỉ like)**
+- Giải thích: Khi user bấm LIKE button → 1 document interaction với type="like" và watch_duration, watch_percentage ghi lại trong cùng document (để track) nhưng **weight chỉ là 1.0 từ type="like"**. Watch_duration và watch_percentage không ảnh hưởng weight!
+
+**Câu hỏi của bạn 2: "Skip = -0.3, nếu âm thế nào?"**
+- ✅ ĐÚNG: Skip weight = **-0.3** (âm = trừ đi)
+- Công thức EMA: `new_vec = 0.85 * old_vec + 0.15 * weight * video_embedding`
+- Nếu weight=-0.3 → `0.15 * (-0.3) * embedding = trừ đi 0.045` từ vector
+- **Ý nghĩa**: User skip = không thích video này → vector giảm "gần gũi" với embedding video này
+
+**Ví dụ cụ thể:**
+```
+Video A: embedding = [0.1, 0.2, 0.3]
+User skip video A → weight = -0.3
+
+new_vec[0] = 0.85 * 0.5 + 0.15 * (-0.3) * 0.1
+           = 0.425 + (-0.0045)
+           = 0.4205  ← GIẢM đi một tý
+
+Kết quả: Vector của user giảm "similarity" với video A
+→ Lần sau gợi ý video tương tự A sẽ thấp hơn
+```
+
+**Câu hỏi của bạn 3: "Chỉ xem không tương tác, tính không? Tính thì weight bao nhiêu?"**
+- ✅ **CÓ tính** interaction_vector (nếu xem đủ lâu)
+- ⚠️ Vẫn luôn **CÓ tạo behavior_log** để track fatigue
+- Weight = **0.2** (nếu xem 80%+) hoặc **0.0** (nếu xem < 50%)
+
+**Recommended Design - Logic IF user chỉ xem (KHÔNG click gì):**
+- **watch_percentage > 0.8 (xem hết 80%+)** → Tạo interaction type="passive_view", weight = 0.2 (yếu), UPDATE interest_vector (nhẹ).
+- **watch_percentage < 0.5 (xem dưới 50%)** → SKIP (không tạo interaction), Chỉ tạo behavior_log, không update vector.
+- *(Nếu 50-80% có thể gán weight 0.05 hoặc skip tùy độ nhạy, hệ thống mặc định skip cho đơn giản hoặc gán 0.05)*.
+
+🎯 **Tại Sao Weight Yếu (0.2) mà Không Phải 0.5?**
+- **Like (weight=1.0):** Explicit intent (User chủ động bấm nút) → Confidence: 99% user thích.
+- **Passive View 25s (weight=0.2):** User không bấm nút. Có thể user bận, "xem tình cờ", "video tự play", hoặc "quên bấm like" → Confidence: 50% user thích. Trọng số 0.2 = 1/5 của Like, yếu hơn nhưng vẫn có ảnh hưởng nhỏ.
+
+**Ví dụ tính toán Vector:**
+Vector hiện tại: `[0.5, 0.3, 0.2]`
+Video embedding: `[0.1, 0.2, 0.3]`
+- Nếu LIKE (weight=1.0): `new_vec = 0.85 * [0.5, 0.3, 0.2] + 0.15 * 1.0 * [0.1, 0.2, 0.3] = [0.44, 0.285, 0.215]` (Thay đổi rõ)
+- Nếu PASSIVE_VIEW (weight=0.2): `new_vec = 0.85 * [0.5, 0.3, 0.2] + 0.15 * 0.2 * [0.1, 0.2, 0.3] = [0.428, 0.261, 0.179]` (Thay đổi nhỏ nhưng vẫn có)
+
+**Giải thích rõ ràng bằng Scenario:**
+
+```
+Scenario 1A: User chỉ xem MỘT CHÚT (<50%) mà không bấm gì
+┌────────────────────────────────┐
+│ User xem video X (8 giây)       │
+├────────────────────────────────┤
+│ ✅ CREATE behavior_logs:        │
+│    ├─ watch_duration: 8.0       │
+│    ├─ swipe_speed: 800px/s      │
+│    ├─ is_interaction: false     │
+│    └─ topic: "football"         │
+│                                 │
+│ ❌ KHÔNG CREATE interactions    │
+│ ❌ KHÔNG update interest_vector │
+│                                 │
+│ ✅ Dùng để: Tính fatigue_score │
+└────────────────────────────────┘
+
+Scenario 1B: User xem GẦN HẾT (>80%) mà không bấm gì
+┌────────────────────────────────┐
+│ User xem video X (25 giây - 85%)│
+├────────────────────────────────┤
+│ ✅ CREATE behavior_logs:        │
+│    ├─ watch_duration: 25.0      │
+│    ├─ is_interaction: false     │
+│    └─ topic: "football"         │
+│                                 │
+│ ✅ CREATE interactions:         │
+│    ├─ type: "passive_view"      │
+│    ├─ watch_duration: 25.0      │
+│    ├─ watch_percentage: 0.85    │
+│    └─ timestamp: now            │
+│                                 │
+│ ✅ UPDATE users.interest_vector │
+│    new_vec = 0.85 * old + 0.15 * 0.2 * video.embedding │
+│                                 │
+│ ✅ Dùng để: Tính fatigue_score + Update vector nhẹ │
+└────────────────────────────────┘
+
+Scenario 2: User xem rồi bấm LIKE
+┌────────────────────────────────┐
+│ User xem video X (28.5 giây)    │
+│ → Rồi bấm LIKE                 │
+├────────────────────────────────┤
+│ ✅ CREATE behavior_logs:        │
+│    ├─ watch_duration: 28.5      │
+│    ├─ is_interaction: true ← ✅  │
+│    └─ topic: "football"         │
+│                                 │
+│ ✅ CREATE interactions:         │
+│    ├─ type: "like"              │
+│    ├─ watch_duration: 28.5      │
+│    ├─ watch_percentage: 0.95    │
+│    └─ timestamp: now            │
+│                                 │
+│ ✅ UPDATE users.interest_vector │
+│    new_vec = 0.85 * old + 0.15 * 1.0 * video.embedding │
+│                                 │
+│ ✅ Dùng để: Cập nhật sở thích + Tính fatigue │
+└────────────────────────────────┘
+
+Scenario 3: User xem rồi SKIP
+┌────────────────────────────────┐
+│ User xem video X (5 giây)       │
+│ → Rồi SKIP (vuốt qua)          │
+├────────────────────────────────┤
+│ ✅ CREATE behavior_logs:        │
+│    ├─ watch_duration: 5.0       │
+│    ├─ swipe_speed: 1200px/s     │
+│    ├─ is_interaction: true ✅   │
+│    └─ topic: "gaming"           │
+│                                 │
+│ ✅ CREATE interactions:         │
+│    ├─ type: "skip"              │
+│    ├─ watch_duration: 5.0       │
+│    └─ timestamp: now            │
+│                                 │
+│ ✅ UPDATE users.interest_vector │
+│    new_vec = 0.85 * old + 0.15 * (-0.3) * video.embedding │
+│             = 0.85 * old - 0.045 * video.embedding │
+│             → GIẢM similarity với video này │
+│                                 │
+│ ✅ Dùng để: Cập nhật sở thích (âm) + Tính fatigue │
+└────────────────────────────────┘
+```
+
+**JSON Examples:**
+
 ```json
 {
-  "_id": "ObjectId(...)",
+  "_id": "ObjectId(int_001)",
   "user_id": "ObjectId(user_123)",
   "video_id": "ObjectId(video_456)",
   "session_id": "ObjectId(session_789)",
@@ -257,9 +407,40 @@ feed_sessions  → chỉ track fatigue/wellbeing của phiên lướt, không đ
   "watch_duration": 28.5,
   "watch_percentage": 0.95,
   "swipe_speed": 0.0,
-  "replay_count": 1,
+  "replay_count": 0,
   "timestamp": "2026-05-17T13:01:22Z"
 }
+```
+
+**Weight calculation for this:**
+```
+weight = INTERACTION_WEIGHTS["like"] = 1.0
+new_vector = 0.85 * old_vector + 0.15 * 1.0 * video_embedding
+```
+
+vs
+
+```json
+{
+  "_id": "ObjectId(int_002)",
+  "user_id": "ObjectId(user_123)",
+  "video_id": "ObjectId(video_789)",
+  "session_id": "ObjectId(session_789)",
+  "type": "skip",
+  "watch_duration": 5.2,
+  "watch_percentage": 0.15,
+  "swipe_speed": 1200.0,
+  "replay_count": 0,
+  "timestamp": "2026-05-17T13:02:10Z"
+}
+```
+
+**Weight calculation for this:**
+```
+weight = INTERACTION_WEIGHTS["skip"] = -0.3
+new_vector = 0.85 * old_vector + 0.15 * (-0.3) * video_embedding
+           = 0.85 * old_vector - 0.045 * video_embedding
+           → Vector GIẢM similarity với video skip này
 ```
 
 ---
