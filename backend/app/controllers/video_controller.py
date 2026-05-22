@@ -33,9 +33,6 @@ async def create_video(
     request: Request,
     title: str = Form(..., description="Tiêu đề video"),
     description: str = Form(..., description="Mô tả ngắn nội dung video"),
-    tags: str = Form(..., description="Các tags phân loại nội dung, cách nhau bằng dấu phẩy"),
-    category: str = Form(..., description="Nhóm lớn"),
-    intensity_level: str = Form(..., description="Mức dopamine"),
     creator_id: str = Form(..., description="ID định danh creator (string slug)"),
     file: UploadFile = File(..., description="File video tải lên S3")
 ):
@@ -44,24 +41,21 @@ async def create_video(
     from app.utils.s3 import upload_to_s3
     file_url = await upload_to_s3(file)
 
-    # 2. Parse tags list from comma-separated string
-    tags_list = [tag.strip() for tag in tags.split(",") if tag.strip()]
-
-    # 3. Read optional/hidden fields from form data
+    # 2. Read optional/hidden fields from form data
     form_data = await request.form()
     view_count = form_data.get("view_count")
     like_count = form_data.get("like_count")
     comment_count = form_data.get("comment_count")
     thumbnail_url = form_data.get("thumbnail_url")
 
-    # 4. Construct VideoCreate schema
+    # 3. Construct VideoCreate schema
     data_dict = {
         "title": title,
         "description": description,
         "url": file_url,
-        "tags": tags_list,
-        "category": category,
-        "intensity_level": intensity_level,
+        "tags": None,
+        "category": None,
+        "intensity_level": None,
         "creator_id": creator_id,
     }
 
@@ -117,6 +111,18 @@ async def get_trending(
     """GET /api/v1/videos/trending — Get trending videos."""
     service = VideoService()
     return await service.get_trending_videos(limit=limit)
+
+
+@router.post(
+    "/train",
+    status_code=status.HTTP_200_OK,
+    summary="Train video classifier model",
+    description="Fetches all video data from MongoDB and trains classification models for categories and tags.",
+)
+async def train_classifier_endpoint():
+    """POST /api/v1/videos/train — Train classifier model."""
+    service = VideoService()
+    return await service.train_classification_model()
 
 
 @router.get(

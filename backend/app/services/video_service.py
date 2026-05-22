@@ -35,6 +35,20 @@ class VideoService:
         """
         from app.models.video import CATEGORY_ENUM, INTENSITY_ENUM
 
+        # Predict category, tags, and intensity_level if missing
+        if not data.category or not data.tags or not data.intensity_level:
+            from app.utils.classifier import predict_all_metadata
+            pred_category, pred_tags, pred_intensity = await predict_all_metadata(
+                description=data.description,
+                title=data.title
+            )
+            if not data.category:
+                data.category = pred_category
+            if not data.tags:
+                data.tags = pred_tags
+            if not data.intensity_level:
+                data.intensity_level = pred_intensity
+
         # Validate enums
         if data.category not in CATEGORY_ENUM:
             raise ValidationException(
@@ -135,6 +149,11 @@ class VideoService:
         """Get top trending videos."""
         docs = await self._repo.find_trending(limit=limit)
         return [self._to_response(doc) for doc in docs]
+
+    async def train_classification_model(self) -> dict:
+        """Fetch all video data and train/fine-tune classification model."""
+        from app.utils.classifier import train_classifier
+        return await train_classifier()
 
     @staticmethod
     def _to_response(doc: dict) -> VideoResponse:
