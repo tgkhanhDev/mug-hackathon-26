@@ -96,6 +96,7 @@ class UserService:
         2. Average their embedding vectors
         3. If no videos found, generate embedding from tag text as fallback
         """
+        import math
         videos = await self._video_repo.find_by_tags(interest_tags, limit=20)
 
         # Filter videos that have embeddings
@@ -109,15 +110,27 @@ class UserService:
                 for i in range(dim):
                     avg_vector[i] += emb[i]
             avg_vector = [x / len(embeddings) for x in avg_vector]
+            
+            # L2-normalize the averaged vector
+            magnitude = math.sqrt(sum(x * x for x in avg_vector))
+            if magnitude > 0:
+                avg_vector = [x / magnitude for x in avg_vector]
+                
             logger.info(
-                f"  📐 Initial vector from {len(embeddings)} matching videos"
+                f"  📐 Initial vector from {len(embeddings)} matching videos (L2-normalized)"
             )
             return avg_vector
 
         # Fallback: generate embedding from tag text
         tag_text = f"User interests: {', '.join(interest_tags)}"
         fallback_vector = await generate_embedding(tag_text)
-        logger.info("  📐 Initial vector from tag text (no matching videos)")
+        
+        # L2-normalize the fallback vector
+        magnitude = math.sqrt(sum(x * x for x in fallback_vector))
+        if magnitude > 0:
+            fallback_vector = [x / magnitude for x in fallback_vector]
+            
+        logger.info("  📐 Initial vector from tag text (no matching videos, L2-normalized)")
         return fallback_vector
 
     @staticmethod

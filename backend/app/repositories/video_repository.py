@@ -36,9 +36,14 @@ class VideoRepository(BaseRepository):
         ]
         return await self.aggregate(pipeline)
 
-    async def find_trending(self, limit: int = 10) -> List[Dict[str, Any]]:
+    async def find_trending(
+        self, limit: int = 10, filter_stage: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
         """Get top trending videos sorted by dynamic trending_score desc."""
-        pipeline = [
+        pipeline = []
+        if filter_stage:
+            pipeline.append({"$match": filter_stage})
+        pipeline.extend([
             {
                 "$addFields": {
                     "trending_score": {
@@ -52,7 +57,7 @@ class VideoRepository(BaseRepository):
             },
             {"$sort": {"trending_score": -1}},
             {"$limit": limit}
-        ]
+        ])
         return await self.aggregate(pipeline)
 
     async def find_without_embedding(self, limit: int = 100) -> List[Dict[str, Any]]:

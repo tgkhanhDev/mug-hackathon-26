@@ -113,6 +113,13 @@ async def main():
     print(f"✅ Inserted {len(video_ids)} test videos.")
 
     print("\n--- [2/5] Creating Test User Profile ---")
+    # Clean up existing test user if any
+    existing_user = await user_repo.find_by_username("tester_sim_20")
+    if existing_user:
+        await user_repo.delete_one(existing_user["id"])
+        await db["interactions"].delete_many({"user_id": existing_user["id"]})
+        print("🗑️ Cleaned up pre-existing test user and interactions.")
+
     # User onboards with initial interest in "music" and "calming"
     user_doc = {
         "username": "tester_sim_20",
@@ -125,8 +132,70 @@ async def main():
     user_id = await user_repo.insert_one(user_doc)
     print(f"✅ Created test user: {user_id} with initial interest in 'music'.")
 
-    # Define a session ID for interactions
-    session_id = str(ObjectId())
+    # Create Feed Session to enable exploration mechanism
+    from app.models.feed_session import FeedSessionCreate
+    session_create = FeedSessionCreate(user_id=user_id)
+    session_response = await interaction_service.create_session(session_create)
+    session_id = session_response.id
+    print(f"✅ Feed Session created: {session_id}.")
+
+    # Mock vector search and find trending to query only our test videos (bypassing Atlas indexing latency)
+    from typing import Optional, Dict, Any
+    async def mock_vector_search(
+        query_vector: list[float],
+        limit: int = 10,
+        num_candidates: int = 100,
+        filter_stage: Optional[Dict[str, Any]] = None,
+        search_weight: float = 100.0,
+        trending_weight: float = 1.0,
+    ) -> list[dict[str, Any]]:
+        query_filter = {"_id": {"$in": [ObjectId(vid) for vid in video_ids]}}
+        if filter_stage:
+            query_filter.update(filter_stage)
+        
+        all_v = await video_repo.find_many(filter=query_filter, limit=100)
+        
+        scored = []
+        for v in all_v:
+            v_emb = v.get("embedding", [])
+            sim = cosine_similarity(query_vector, v_emb)
+            
+            views = v.get("view_count", 0)
+            likes = v.get("like_count", 0)
+            comments = v.get("comment_count", 0)
+            trending_score = views * 1 + likes * 3 + comments * 5
+            
+            search_score = sim
+            total_score = search_score * search_weight + trending_score * trending_weight
+            scored.append((v, total_score))
+            
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return [item[0] for item in scored[:limit]]
+
+    async def mock_find_trending(
+        limit: int = 10,
+        filter_stage: Optional[Dict[str, Any]] = None,
+    ) -> list[dict[str, Any]]:
+        query_filter = {"_id": {"$in": [ObjectId(vid) for vid in video_ids]}}
+        if filter_stage:
+            query_filter.update(filter_stage)
+        
+        all_v = await video_repo.find_many(filter=query_filter, limit=100)
+        
+        scored = []
+        for v in all_v:
+            views = v.get("view_count", 0)
+            likes = v.get("like_count", 0)
+            comments = v.get("comment_count", 0)
+            trending_score = views * 1 + likes * 3 + comments * 5
+            scored.append((v, trending_score))
+            
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return [item[0] for item in scored[:limit]]
+
+    # Apply the mocks to feed_service's video repository instance
+    feed_service._video_repo.vector_search = mock_vector_search
+    feed_service._video_repo.find_trending = mock_find_trending
 
     print("\n--- [3/5] Starting 20-Scroll Feed Simulation ---")
     print("User is onboarded to 'music' but now wants to watch 'coding' videos.")
@@ -141,35 +210,26 @@ async def main():
         # 1. Fetch Feed (Fetch 3 candidate videos)
         feed_videos = await feed_service.get_feed(user_id, limit=3)
         if not feed_videos:
-            # Fallback to local similarity search for testing purposes
-            # (e.g. if Atlas index is still indexing or has dimension mismatch)
-            from app.services.video_service import VideoService
-            all_videos = await video_repo.find_many(filter={"_id": {"$in": [ObjectId(vid) for vid in video_ids]}}, limit=100)
-            
-            scored_videos = []
-            for v in all_videos:
-                v_emb = v.get("embedding", [])
-                sim = cosine_similarity(current_vector, v_emb)
-                # Combine similarity and trending score using weights
-                total_score = sim * 10.0 + v.get("trending_score", 0.0) * 0.001
-                scored_videos.append((v, total_score))
-            
-            # Sort by total_score desc
-            scored_videos.sort(key=lambda x: x[1], reverse=True)
-            feed_videos = [VideoService._to_response(x[0]) for x in scored_videos[:3]]
-            
-        if not feed_videos:
             print("⚠️ No feed videos returned.")
             break
 
-        # Pick the top recommended video to interact with
-        top_video = feed_videos[0]
-        video_tags = top_video.tags
-        video_title = top_video.title
+        # Pick the video to interact with:
+        # If there is any coding video in the feed, user scrolls to it and likes it.
+        # Otherwise, they interact with the top video (music) and skip it.
+        interacted_video = None
+        for v in feed_videos:
+            if "coding" in v.tags:
+                interacted_video = v
+                break
+        
+        if not interacted_video:
+            interacted_video = feed_videos[0]
+
+        video_tags = interacted_video.tags
+        video_title = interacted_video.title
         primary_tag = "coding" if "coding" in video_tags else "music"
 
         # Determine user action
-        # User now prefers coding, so they LIKE coding and SKIP music
         if "coding" in video_tags:
             action = "like"
             watch_pct = 1.0
@@ -182,7 +242,7 @@ async def main():
         # Log Interaction (This will update user's interest vector in real-time)
         interaction_data = InteractionCreate(
             user_id=user_id,
-            video_id=top_video.id,
+            video_id=interacted_video.id,
             session_id=session_id,
             type=action,
             watch_duration=watch_duration,
@@ -190,7 +250,7 @@ async def main():
             swipe_speed=150.0 if action == "skip" else 10.0,
             replay_count=1 if action == "like" else 0
         )
-        await interaction_service.log_interaction(interaction_data)
+        await interaction_service.record_interaction(interaction_data)
 
         # Retrieve updated user profile to check vector drift
         updated_user = await user_repo.find_by_id(user_id)
@@ -229,6 +289,10 @@ async def main():
     # Delete test interactions
     await db["interactions"].delete_many({"user_id": user_id})
     print("🗑️ Cleaned up test interactions.")
+
+    # Delete feed session
+    await db["feed_sessions"].delete_one({"_id": ObjectId(session_id)})
+    print("🗑️ Cleaned up feed session.")
 
     await disconnect_db()
     print("🎉 Benchmark and cleanup completed.")

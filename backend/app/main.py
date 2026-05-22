@@ -99,7 +99,6 @@ app.include_router(scheduler_controller.router, prefix=API_PREFIX)
 app.include_router(upload_controller.router, prefix=API_PREFIX)
 app.include_router(interaction_controller.router, prefix=API_PREFIX)
 app.include_router(feed_controller.router, prefix=API_PREFIX)
-app.include_router(interaction_controller.router, prefix=API_PREFIX)
 
 
 # ── Health Check ───────────────────────────────────────────────

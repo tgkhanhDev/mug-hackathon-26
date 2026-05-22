@@ -310,9 +310,9 @@ class InteractionService:
 
         log_id = await self._log_repo.insert_one(log_doc.model_dump())
 
-        # Update session intensity counters (fire-and-forget)
+        # Update session intensity counters and calculate fatigue (fire-and-forget)
         asyncio.create_task(
-            self._update_session_intensity(data.session_id, data.video_id)
+            self._update_session_metrics_pipeline(data.session_id, data.video_id)
         )
 
         return BehaviorLogResponse(
@@ -328,6 +328,16 @@ class InteractionService:
             consecutive_same_topic=consecutive,
         )
 
+    async def _update_session_metrics_pipeline(self, session_id: str, video_id: str) -> None:
+        """Update session intensity counters first, then compute fatigue score and state."""
+        try:
+            # 1. Update intensity count
+            await self._update_session_intensity(session_id, video_id)
+            # 2. Update fatigue and state
+            await self._update_session_fatigue_and_state(session_id)
+        except Exception as exc:
+            logger.error(f"Error in session metrics pipeline: {exc}")
+
     async def _update_session_intensity(self, session_id: str, video_id: str) -> None:
         """Update high/low intensity counts for the session based on video's intensity_level."""
         try:
@@ -338,6 +348,96 @@ class InteractionService:
                 )
         except Exception as exc:
             logger.warning(f"Intensity count update failed: {exc}")
+
+    async def _update_session_fatigue_and_state(self, session_id: str) -> None:
+        """
+        Calculate fatigue score based on the last 10 behavior logs
+        and transition the session's adaptive state.
+        """
+        try:
+            if not session_id:
+                return
+
+            # Fetch session to get dopamine intensity counters
+            session = await self._session_repo.find_by_id(session_id)
+            if not session:
+                return
+
+            # Get the 10 most recent behavior logs
+            logs = await self._log_repo.get_recent_logs(session_id, limit=10)
+            if not logs:
+                return
+
+            log_points_list = []
+            for log in logs:
+                # 1. Watch duration penalty
+                watch_dur = log.get("watch_duration", 0.0)
+                if watch_dur < 2.0:
+                    duration_penalty = 30
+                elif watch_dur < 5.0:
+                    duration_penalty = 15
+                elif watch_dur < 15.0:
+                    duration_penalty = 5
+                else:
+                    duration_penalty = 0
+
+                # 2. Swipe speed penalty
+                swipe_spd = log.get("swipe_speed", 0.0)
+                if swipe_spd > 800.0:
+                    swipe_penalty = 20
+                elif swipe_spd > 400.0:
+                    swipe_penalty = 10
+                else:
+                    swipe_penalty = 0
+
+                # 3. Passive scroll penalty
+                passive_penalty = 15 if not log.get("is_interaction", False) else 0
+
+                # 4. Consecutive topic penalty
+                consecutive_count = log.get("consecutive_same_topic", 0) + 1
+                if consecutive_count >= 5:
+                    consecutive_penalty = 25
+                elif consecutive_count >= 3:
+                    consecutive_penalty = 15
+                else:
+                    consecutive_penalty = 0
+
+                log_points_list.append(duration_penalty + swipe_penalty + passive_penalty + consecutive_penalty)
+
+            avg_log_points = sum(log_points_list) / len(logs)
+
+            # Dopamine Intensity Penalty
+            high_count = session.get("high_intensity_count", 0)
+            low_count = session.get("low_intensity_count", 0)
+            total_intensity_count = high_count + low_count
+            dopamine_penalty = 10.0 * (high_count / total_intensity_count) if total_intensity_count > 0 else 0.0
+
+            fatigue_score = min(100.0, max(0.0, avg_log_points + dopamine_penalty))
+
+            # Calculate averages for logging/storing
+            avg_watch_duration = sum(log.get("watch_duration", 0.0) for log in logs) / len(logs)
+            avg_swipe_speed = sum(log.get("swipe_speed", 0.0) for log in logs) / len(logs)
+
+            # Adaptive State Machine
+            if fatigue_score < 40.0:
+                adaptive_state = "normal"
+            elif fatigue_score <= 70.0:
+                adaptive_state = "warning"
+            else:
+                adaptive_state = "exhausted"
+
+            stats = {
+                "fatigue_score": fatigue_score,
+                "adaptive_state": adaptive_state,
+                "avg_watch_duration": avg_watch_duration,
+                "avg_swipe_speed": avg_swipe_speed,
+                "updated_at": datetime.utcnow()
+            }
+            await self._session_repo.update_session_stats(session_id, stats)
+            logger.info(f"Updated session {session_id} fatigue: {fatigue_score:.2f} | state: {adaptive_state}")
+
+        except Exception as exc:
+            logger.error(f"Failed to calculate fatigue for session {session_id}: {exc}")
 
     # ══════════════════════════════════════════════════════════════
     # Trending — Time-Decay Score

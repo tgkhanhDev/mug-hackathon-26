@@ -93,16 +93,16 @@ class InteractionRepository(BaseRepository):
             {"_id": ObjectId(video_id)},
             [
                 {"$set": {
-                    "view_count": {"$add": ["$view_count", inc_payload.get("view_count", 0)]},
+                    "view_count": {"$add": [{"$ifNull": ["$view_count", 0]}, inc_payload.get("view_count", 0)]},
                     "like_count": {
                         "$add": [
-                            "$like_count",
+                            {"$ifNull": ["$like_count", 0]},
                             1 if inc_payload.get("like_count") else 0,
                         ]
                     },
                     "comment_count": {
                         "$add": [
-                            "$comment_count",
+                            {"$ifNull": ["$comment_count", 0]},
                             1 if inc_payload.get("comment_count") else 0,
                         ]
                     },
@@ -111,9 +111,9 @@ class InteractionRepository(BaseRepository):
                 {"$set": {
                     "trending_score": {
                         "$add": [
-                            {"$multiply": ["$view_count", 1]},
-                            {"$multiply": ["$like_count", 3]},
-                            {"$multiply": ["$comment_count", 5]},
+                            {"$multiply": [{"$ifNull": ["$view_count", 0]}, 1]},
+                            {"$multiply": [{"$ifNull": ["$like_count", 0]}, 3]},
+                            {"$multiply": [{"$ifNull": ["$comment_count", 0]}, 5]},
                         ]
                     }
                 }},
@@ -141,6 +141,8 @@ class FeedSessionRepository(BaseRepository):
 
     async def increment_videos_watched(self, session_id: str) -> None:
         """Atomically increment total_videos_watched counter."""
+        if not ObjectId.is_valid(session_id):
+            return
         col = get_collection("feed_sessions")
         await col.update_one(
             {"_id": ObjectId(session_id)},
@@ -157,6 +159,8 @@ class FeedSessionRepository(BaseRepository):
         self, session_id: str, intensity_level: str
     ) -> None:
         """Increment high/low intensity video count for the session."""
+        if not ObjectId.is_valid(session_id):
+            return
         col = get_collection("feed_sessions")
         field = (
             "high_intensity_count"
