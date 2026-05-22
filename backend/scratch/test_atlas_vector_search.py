@@ -1,4 +1,6 @@
 import asyncio
+from typing import List
+
 from app.repositories.database import connect_db, get_database, disconnect_db
 from app.utils.embedding import generate_embedding
 
@@ -17,7 +19,14 @@ async def test_vector_search():
         return
 
     # 2. Generate a real query vector using the configured Hugging Face model
-    search_query = "nature and trees"
+    search_query = "Directly below view of forest"
+
+    # search_query = build_embed_text(
+    #     title="Directly below view of forest",
+    #     description="High-quality nature video shot by Dmitry Marchenkov on Pexels.",
+    #     category="nature",
+    #     tags=["nature", "below", "view", "forest", "directly"],
+    # )
     print(f"🧠 Generating embedding for query text: '{search_query}'...")
     try:
         query_vector = await generate_embedding(search_query)
@@ -77,6 +86,14 @@ async def test_vector_search():
         print("4. Check if the index building status on the MongoDB Atlas website has reached 'Active' status.")
 
     await disconnect_db()
+
+def build_embed_text(
+    title: str, description: str, category: str, tags: List[str]
+) -> str:
+    """
+    Build the input text for embedding generation.
+    """
+    return f"{title}. {description}. Category: {category}. Tags: {', '.join(tags)}"
 
 if __name__ == "__main__":
     asyncio.run(test_vector_search())
