@@ -8,11 +8,9 @@ from typing import List
 from app.models.video import VideoResponse
 from app.repositories.user_repository import UserRepository
 from app.repositories.video_repository import VideoRepository
-from app.repositories.interaction_repository import (
-    FeedSessionRepository,
-    InteractionRepository,
-    BehaviorLogRepository,
-)
+from app.repositories.behavior_log_repository import BehaviorLogRepository
+from app.repositories.feed_session_repository import FeedSessionRepository
+from app.repositories.interaction_repository import InteractionRepository
 from app.services.video_service import VideoService
 from app.utils.exceptions import NotFoundException
 

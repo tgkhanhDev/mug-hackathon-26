@@ -26,11 +26,9 @@ from app.models.interaction import (
     InteractionInDB,
     InteractionResponse,
 )
-from app.repositories.interaction_repository import (
-    BehaviorLogRepository,
-    FeedSessionRepository,
-    InteractionRepository,
-)
+from app.repositories.behavior_log_repository import BehaviorLogRepository
+from app.repositories.feed_session_repository import FeedSessionRepository
+from app.repositories.interaction_repository import InteractionRepository
 from app.repositories.user_repository import UserRepository
 from app.repositories.video_repository import VideoRepository
 from app.utils.exceptions import NotFoundException, ValidationException
