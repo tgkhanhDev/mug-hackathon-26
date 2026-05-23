@@ -12,6 +12,7 @@ from bson import ObjectId
 
 from app.repositories.base import BaseRepository
 from app.repositories.database import get_collection
+from app.utils.formula.trending import build_trending_score_update_pipeline
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -63,6 +64,10 @@ class InteractionRepository(BaseRepository):
         )
         return list({d["video_id"] for d in docs})
 
+    async def find_by_session(self, session_id: str) -> List[Dict[str, Any]]:
+        """Return all interactions in a given session."""
+        return await self.find_many({"session_id": session_id})
+
     async def increment_video_counters(
         self, video_id: str, interaction_type: str
     ) -> None:
@@ -89,34 +94,9 @@ class InteractionRepository(BaseRepository):
             inc_payload[inc_field] = 1
 
         # Pipeline update: $inc counters then recalculate trending_score
+        pipeline = build_trending_score_update_pipeline(inc_payload)
         await videos_col.update_one(
             {"_id": ObjectId(video_id)},
-            [
-                {"$set": {
-                    "view_count": {"$add": [{"$ifNull": ["$view_count", 0]}, inc_payload.get("view_count", 0)]},
-                    "like_count": {
-                        "$add": [
-                            {"$ifNull": ["$like_count", 0]},
-                            1 if inc_payload.get("like_count") else 0,
-                        ]
-                    },
-                    "comment_count": {
-                        "$add": [
-                            {"$ifNull": ["$comment_count", 0]},
-                            1 if inc_payload.get("comment_count") else 0,
-                        ]
-                    },
-                    "updated_at": "$$NOW",
-                }},
-                {"$set": {
-                    "trending_score": {
-                        "$add": [
-                            {"$multiply": [{"$ifNull": ["$view_count", 0]}, 1]},
-                            {"$multiply": [{"$ifNull": ["$like_count", 0]}, 3]},
-                            {"$multiply": [{"$ifNull": ["$comment_count", 0]}, 5]},
-                        ]
-                    }
-                }},
-            ],
+            pipeline,
         )
 

@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from app.repositories.base import BaseRepository
 from app.repositories.database import get_collection
+from app.utils.formula.trending import build_trending_score_pipeline_stage
 
 
 class VideoRepository(BaseRepository):
@@ -20,17 +21,7 @@ class VideoRepository(BaseRepository):
         """Find videos that match any of the given tags sorted by dynamic trending_score."""
         pipeline = [
             {"$match": {"tags": {"$in": tags}}},
-            {
-                "$addFields": {
-                    "trending_score": {
-                        "$add": [
-                            {"$multiply": [{"$ifNull": ["$view_count", 0]}, 1]},
-                            {"$multiply": [{"$ifNull": ["$like_count", 0]}, 3]},
-                            {"$multiply": [{"$ifNull": ["$comment_count", 0]}, 5]}
-                        ]
-                    }
-                }
-            },
+            build_trending_score_pipeline_stage(),
             {"$sort": {"trending_score": -1}},
             {"$limit": limit}
         ]
@@ -44,17 +35,7 @@ class VideoRepository(BaseRepository):
         if filter_stage:
             pipeline.append({"$match": filter_stage})
         pipeline.extend([
-            {
-                "$addFields": {
-                    "trending_score": {
-                        "$add": [
-                            {"$multiply": [{"$ifNull": ["$view_count", 0]}, 1]},
-                            {"$multiply": [{"$ifNull": ["$like_count", 0]}, 3]},
-                            {"$multiply": [{"$ifNull": ["$comment_count", 0]}, 5]}
-                        ]
-                    }
-                }
-            },
+            build_trending_score_pipeline_stage(),
             {"$sort": {"trending_score": -1}},
             {"$limit": limit}
         ])
@@ -103,13 +84,7 @@ class VideoRepository(BaseRepository):
             {
                 "$addFields": {
                     "search_score": {"$meta": "vectorSearchScore"},
-                    "trending_score": {
-                        "$add": [
-                            {"$multiply": [{"$ifNull": ["$view_count", 0]}, 1]},
-                            {"$multiply": [{"$ifNull": ["$like_count", 0]}, 3]},
-                            {"$multiply": [{"$ifNull": ["$comment_count", 0]}, 5]}
-                        ]
-                    }
+                    **build_trending_score_pipeline_stage()["$addFields"],
                 }
             },
             {

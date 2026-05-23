@@ -13,14 +13,12 @@ Responsibilities:
 
 import asyncio
 import logging
-import math
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from app.models.behavior_log import BehaviorLogCreate, BehaviorLogInDB, BehaviorLogResponse
 from app.models.feed_session import FeedSessionCreate, FeedSessionInDB, FeedSessionResponse
 from app.models.interaction import (
-    INTERACTION_WEIGHTS,
     INTERACTION_TYPES,
     InteractionCreate,
     InteractionInDB,
@@ -32,30 +30,23 @@ from app.repositories.interaction_repository import InteractionRepository
 from app.repositories.user_repository import UserRepository
 from app.repositories.video_repository import VideoRepository
 from app.utils.exceptions import NotFoundException, ValidationException
+from bson import ObjectId
+
+from app.utils.formula import (
+    calculate_ema_vector,
+    calculate_batch_ema_vector,
+    calculate_fatigue_score,
+    calculate_log_penalty,
+    calculate_time_decay_metrics,
+    determine_adaptive_state,
+    get_interaction_weight,
+)
 from app.utils.websocket_manager import ws_manager
 
 logger = logging.getLogger(__name__)
 
-# ── Constants ──────────────────────────────────────────────────────
-# EMA momentum: how much we preserve the existing vector
-# 0.85 = keep 85% old, blend 15% new signal
-EMA_MOMENTUM = 0.85
-
-# Time-decay half-life in hours, per video category
-HALF_LIFE_HOURS: Dict[str, float] = {
-    "entertainment": 168.0,   # 7 days
-    "sports":        120.0,   # 5 days
-    "gaming":        168.0,   # 7 days
-    "lifestyle":     336.0,   # 14 days
-    "education":     720.0,   # 30 days
-    "calming":       720.0,   # 30 days
-    "nature":        720.0,   # 30 days
-    "cooking":       336.0,   # 14 days
-    "_default":      168.0,   # 7 days fallback
-}
-
-# Minimum views/day for a video to still be considered "trending"
-MIN_VELOCITY_VIEWS_PER_DAY = 10
+# All formula constants and pure-computation functions now live in
+# app.utils.formula (trending, interest_vector, fatigue sub-modules).
 
 
 class InteractionService:
@@ -115,7 +106,6 @@ class InteractionService:
         interaction_id, *_ = await asyncio.gather(
             self._repo.insert_one(doc.model_dump()),
             self._repo.increment_video_counters(data.video_id, data.type),
-            self._update_interest_vector(data.user_id, data.video_id, data.type, video),
             self._session_repo.increment_videos_watched(data.session_id),
         )
 
@@ -144,74 +134,64 @@ class InteractionService:
         )
 
     # ══════════════════════════════════════════════════════════════
-    # Interest Vector — EMA update
+    # Interest Vector — Batch EMA update
     # ══════════════════════════════════════════════════════════════
 
-    async def _update_interest_vector(
-        self,
-        user_id: str,
-        video_id: str,
-        interaction_type: str,
-        video: Optional[Dict[str, Any]] = None,
-    ) -> None:
+    async def _batch_update_interest_vector(self, session_id: str, user_id: str) -> None:
         """
-        Update user's interest_vector using Exponential Moving Average.
-
-        Formula:
-            new_vec = α * current_vec + (1-α) * weight * video_embedding
-            then L2-normalize for cosine similarity correctness.
-
-        α = EMA_MOMENTUM = 0.85
-        weight = INTERACTION_WEIGHTS[type]  (like=1.0, skip=-0.3, ...)
+        Batch update user's interest_vector using Exponential Moving Average
+        based on all interactions in the ended session.
         """
-        weight = INTERACTION_WEIGHTS.get(interaction_type, 0.0)
-        if weight == 0.0:
-            return  # Neutral signal — no update needed
-
         try:
-            # Fetch in parallel if video not already passed
-            if video is None:
-                user, video = await asyncio.gather(
-                    self._user_repo.find_by_id(user_id),
-                    self._video_repo.find_by_id(video_id),
-                )
-            else:
-                user = await self._user_repo.find_by_id(user_id)
+            interactions = await self._repo.find_by_session(session_id)
+            if not interactions:
+                return
 
-            if not user or not video:
+            # Get unique video IDs
+            video_ids = list({i["video_id"] for i in interactions})
+            if not video_ids:
+                return
+            
+            # Use find_many with $in operator
+            videos = await self._video_repo.find_many({"_id": {"$in": [ObjectId(vid) for vid in video_ids if ObjectId.is_valid(vid)]}})
+            video_map = {str(v.get("id", v.get("_id"))): v for v in videos}
+
+            list_of_video_vecs = []
+            list_of_weights = []
+
+            for interaction in interactions:
+                vid = interaction["video_id"]
+                weight = get_interaction_weight(interaction["type"])
+                
+                if weight != 0.0 and vid in video_map:
+                    video_vec = video_map[vid].get("embedding", [])
+                    if video_vec:
+                        list_of_video_vecs.append(video_vec)
+                        list_of_weights.append(weight)
+
+            if not list_of_video_vecs:
+                return
+
+            user = await self._user_repo.find_by_id(user_id)
+            if not user:
                 return
 
             current_vec: List[float] = user.get("interest_vector", [])
-            video_vec: List[float] = video.get("embedding", [])
 
-            if not video_vec:
-                logger.debug(f"Video {video_id} has no embedding — skipping vector update")
-                return
+            if current_vec and len(current_vec) != len(list_of_video_vecs[0]):
+                current_vec = []  # Reset if dimension mismatch
 
-            if not current_vec or len(current_vec) != len(video_vec):
-                # No existing vector or dimension mismatch — use video embedding as-is
-                current_vec = video_vec
-
-            α = EMA_MOMENTUM
-            new_vec = [
-                α * c + (1.0 - α) * weight * v
-                for c, v in zip(current_vec, video_vec)
-            ]
-
-            # L2-normalize so cosine distance works correctly in $vectorSearch
-            magnitude = math.sqrt(sum(x * x for x in new_vec))
-            if magnitude > 0:
-                new_vec = [x / magnitude for x in new_vec]
+            new_vec = calculate_batch_ema_vector(current_vec, list_of_video_vecs, list_of_weights)
 
             await self._user_repo.update_interest_vector(user_id, new_vec)
-            logger.debug(
-                f"📐 Vector updated | user={user_id} | type={interaction_type} "
-                f"| weight={weight} | α={α}"
+            logger.info(
+                f"📐 Batch Vector updated | user={user_id} | session={session_id} "
+                f"| interactions={len(list_of_weights)}"
             )
 
         except Exception as exc:
-            # Non-critical — log and continue. Don't fail the whole interaction.
-            logger.error(f"Vector update failed for user={user_id}: {exc}")
+            # Non-critical — log and continue.
+            logger.error(f"Batch vector update failed for user={user_id}, session={session_id}: {exc}")
 
     # ══════════════════════════════════════════════════════════════
     # WebSocket — broadcast fresh stats
@@ -266,8 +246,33 @@ class InteractionService:
         if not session:
             raise NotFoundException("FeedSession", session_id)
 
+        # Calculate final overall session stats from all behavior logs
+        logs = await self._log_repo.find_many({"session_id": session_id}, limit=2000)
+        if logs:
+            avg_watch_duration = sum(log.get("watch_duration", 0.0) for log in logs) / len(logs)
+            avg_swipe_speed = sum(log.get("swipe_speed", 0.0) for log in logs) / len(logs)
+            
+            # Count unique video IDs watched in this session
+            unique_video_ids = {log.get("video_id") for log in logs if log.get("video_id")}
+            total_videos_watched = len(unique_video_ids)
+            
+            await self._session_repo.update_session_stats(session_id, {
+                "avg_watch_duration": avg_watch_duration,
+                "avg_swipe_speed": avg_swipe_speed,
+                "total_videos_watched": total_videos_watched,
+            })
+            session["avg_watch_duration"] = avg_watch_duration
+            session["avg_swipe_speed"] = avg_swipe_speed
+            session["total_videos_watched"] = total_videos_watched
+
         await self._session_repo.end_session(session_id)
         session["ended_at"] = datetime.utcnow()
+        
+        # Trigger batch update of interest vector in the background
+        asyncio.create_task(
+            self._batch_update_interest_vector(session_id, session["user_id"])
+        )
+        
         return self._session_to_response(session)
 
     async def get_session(self, session_id: str) -> FeedSessionResponse:
@@ -289,6 +294,7 @@ class InteractionService:
         Also updates session intensity counters if video intensity is known.
         """
         # Lookup consecutive same-topic count from recent logs
+        # số lần lặp lại của 1 topic trong 10 log gần nhất 
         consecutive = await self._log_repo.get_consecutive_topic_count(
             data.session_id, data.topic, limit=10
         )
@@ -306,9 +312,10 @@ class InteractionService:
             consecutive_same_topic=consecutive,
         )
 
+        # lưu behavior_log
         log_id = await self._log_repo.insert_one(log_doc.model_dump())
 
-        # Update session intensity counters and calculate fatigue (fire-and-forget)
+        # Update session ensity counters and calculate fatigue (fire-and-forget)
         asyncio.create_task(
             self._update_session_metrics_pipeline(data.session_id, data.video_id)
         )
@@ -366,69 +373,26 @@ class InteractionService:
             if not logs:
                 return
 
-            log_points_list = []
-            for log in logs:
-                # 1. Watch duration penalty
-                watch_dur = log.get("watch_duration", 0.0)
-                if watch_dur < 2.0:
-                    duration_penalty = 30
-                elif watch_dur < 5.0:
-                    duration_penalty = 15
-                elif watch_dur < 15.0:
-                    duration_penalty = 5
-                else:
-                    duration_penalty = 0
+            # Compute per-log penalties via formula module
+            log_penalties = [
+                calculate_log_penalty(
+                    watch_duration=log.get("watch_duration", 0.0),
+                    swipe_speed=log.get("swipe_speed", 0.0),
+                    is_interaction=log.get("is_interaction", False),
+                    consecutive_same_topic=log.get("consecutive_same_topic", 0),
+                )
+                for log in logs
+            ]
 
-                # 2. Swipe speed penalty
-                swipe_spd = log.get("swipe_speed", 0.0)
-                if swipe_spd > 800.0:
-                    swipe_penalty = 20
-                elif swipe_spd > 400.0:
-                    swipe_penalty = 10
-                else:
-                    swipe_penalty = 0
-
-                # 3. Passive scroll penalty
-                passive_penalty = 15 if not log.get("is_interaction", False) else 0
-
-                # 4. Consecutive topic penalty
-                consecutive_count = log.get("consecutive_same_topic", 0) + 1
-                if consecutive_count >= 5:
-                    consecutive_penalty = 25
-                elif consecutive_count >= 3:
-                    consecutive_penalty = 15
-                else:
-                    consecutive_penalty = 0
-
-                log_points_list.append(duration_penalty + swipe_penalty + passive_penalty + consecutive_penalty)
-
-            avg_log_points = sum(log_points_list) / len(logs)
-
-            # Dopamine Intensity Penalty
             high_count = session.get("high_intensity_count", 0)
             low_count = session.get("low_intensity_count", 0)
-            total_intensity_count = high_count + low_count
-            dopamine_penalty = 10.0 * (high_count / total_intensity_count) if total_intensity_count > 0 else 0.0
 
-            fatigue_score = min(100.0, max(0.0, avg_log_points + dopamine_penalty))
-
-            # Calculate averages for logging/storing
-            avg_watch_duration = sum(log.get("watch_duration", 0.0) for log in logs) / len(logs)
-            avg_swipe_speed = sum(log.get("swipe_speed", 0.0) for log in logs) / len(logs)
-
-            # Adaptive State Machine
-            if fatigue_score < 40.0:
-                adaptive_state = "normal"
-            elif fatigue_score <= 70.0:
-                adaptive_state = "warning"
-            else:
-                adaptive_state = "exhausted"
+            fatigue_score = calculate_fatigue_score(log_penalties, high_count, low_count)
+            adaptive_state = determine_adaptive_state(fatigue_score)
 
             stats = {
                 "fatigue_score": fatigue_score,
                 "adaptive_state": adaptive_state,
-                "avg_watch_duration": avg_watch_duration,
-                "avg_swipe_speed": avg_swipe_speed,
                 "updated_at": datetime.utcnow()
             }
             await self._session_repo.update_session_stats(session_id, stats)
@@ -451,13 +415,8 @@ class InteractionService:
 
         Algorithm:
           1. Fetch top N*3 videos by raw trending_score
-          2. Apply time-decay: effective_score = raw_score * e^(-λ * age_hours)
-             λ = ln(2) / half_life_hours   (category-specific)
-          3. Mark videos as is_trending=False if velocity < threshold
-          4. Sort by effective_score, return top N
-
-        This naturally demotes "zombie" videos that accumulated high raw scores
-        long ago but are no longer generating fresh engagement.
+          2. Apply time-decay via :func:`calculate_time_decay_metrics`
+          3. Sort by effective_score, return top N
         """
         # Fetch a wider candidate pool for re-ranking
         candidates = await self._video_repo.find_many(
@@ -470,52 +429,23 @@ class InteractionService:
         enriched = []
 
         for video in candidates:
-            created_at: datetime = video.get("created_at", now)
-            age_hours = max(0.0, (now - created_at).total_seconds() / 3600)
-
-            category = video.get("category", "_default")
-            half_life = HALF_LIFE_HOURS.get(category, HALF_LIFE_HOURS["_default"])
-
-            # Decay constant λ = ln(2) / half_life
-            lam = math.log(2) / half_life
-            decay_factor = math.exp(-lam * age_hours)
-
             raw_score = video.get("trending_score", 0.0)
-            effective_score = raw_score * decay_factor
 
-            # Velocity check: views/day from snapshot
-            # Use view_count_snapshot + snapshot_at if available (set by scheduler)
-            # Fallback: assume uniform distribution over age
-            snapshot_views = video.get("view_count_snapshot", 0)
-            snapshot_at: Optional[datetime] = video.get("snapshot_at")
-            view_count = video.get("view_count", 0)
-
-            if snapshot_at and snapshot_views is not None:
-                elapsed_days = max(
-                    0.01,
-                    (now - snapshot_at).total_seconds() / 86400,
-                )
-                velocity_7d = (view_count - snapshot_views) / elapsed_days
-            elif age_hours > 0:
-                velocity_7d = view_count / (age_hours / 24)
-            else:
-                velocity_7d = view_count
-
-            # A video is out-of-trend if growth velocity is below threshold
-            # OR if it's older than window_days and its effective score is low
-            is_trending = (
-                velocity_7d >= MIN_VELOCITY_VIEWS_PER_DAY
-                and age_hours <= window_days * 24 * 4  # generous 4x window
+            metrics = calculate_time_decay_metrics(
+                now=now,
+                created_at=video.get("created_at", now),
+                category=video.get("category", "_default"),
+                raw_score=raw_score,
+                view_count=video.get("view_count", 0),
+                snapshot_at=video.get("snapshot_at"),
+                snapshot_views=video.get("view_count_snapshot", 0),
+                window_days=window_days,
             )
 
             enriched.append({
                 **video,
                 "raw_score": raw_score,
-                "effective_score": round(effective_score, 2),
-                "age_hours": round(age_hours, 1),
-                "decay_factor": round(decay_factor, 4),
-                "velocity_7d": round(velocity_7d, 1),
-                "is_trending": is_trending,
+                **metrics,
             })
 
         # Re-sort by effective score (time-decayed)
@@ -528,6 +458,8 @@ class InteractionService:
 
     async def get_user_vector_status(self, user_id: str) -> Dict[str, Any]:
         """Return a summary of the user's interest_vector (for debug/UI)."""
+        import math
+
         user = await self._user_repo.find_by_id(user_id)
         if not user:
             raise NotFoundException("User", user_id)
