@@ -69,6 +69,8 @@ async def update_embedding_schedule(
     description="Manually trigger the embedding generation job immediately, "
     "without waiting for the next scheduled run.",
 )
+
+# hàm này để embedding video
 async def trigger_embedding():
     """POST /api/v1/scheduler/embedding/trigger — Run job now."""
     return await trigger_embedding_job_now()

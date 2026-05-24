@@ -18,7 +18,9 @@ from bson import ObjectId
 from app.repositories.database import connect_db, get_database, disconnect_db
 from app.repositories.video_repository import VideoRepository
 from app.repositories.user_repository import UserRepository
-from app.repositories.interaction_repository import InteractionRepository, FeedSessionRepository, BehaviorLogRepository
+from app.repositories.interaction_repository import InteractionRepository
+from app.repositories.feed_session_repository import FeedSessionRepository
+from app.repositories.behavior_log_repository import BehaviorLogRepository
 from app.services.feed_service import FeedService
 from app.services.interaction_service import InteractionService
 from app.services.user_service import UserService
