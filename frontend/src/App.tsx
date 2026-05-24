@@ -362,28 +362,50 @@ function App() {
 
         </div>
 
-        {/* Real-time Well-being Overlay Indicator (Low Cognitive Load UI) */}
-        <div className="absolute top-16 left-4 right-4 z-40 bg-zinc-900/80 backdrop-blur-md rounded-2xl p-3 border border-zinc-800/80 flex items-center justify-between shadow-lg">
-          <div className="flex items-center gap-2">
-            <Brain size={18} className={fatigueScore > 70 ? 'text-rose-400 animate-pulse' : 'text-emerald-400'} />
-            <div className="flex flex-col">
-              <span className="text-[10px] text-zinc-400 font-medium">Chỉ số Mệt mỏi (Fatigue)</span>
-              <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                {fatigueScore}% 
-                {fatigueScore >= 75 && (
-                  <span className="text-[9px] bg-rose-500/20 text-rose-300 px-1 rounded font-normal border border-rose-500/30">
-                    Doomscrolling!
-                  </span>
-                )}
-              </span>
+        {/* Real-time Well-being Overlay Indicator (Premium Animated Bar) */}
+        <div className={`absolute top-16 left-4 right-4 z-40 backdrop-blur-md rounded-2xl p-3 border shadow-lg transition-all duration-700 ${
+          fatigueScore > 70
+            ? 'bg-rose-950/80 border-rose-500/40 shadow-rose-500/20'
+            : fatigueScore > 40
+              ? 'bg-amber-950/80 border-amber-500/30 shadow-amber-500/10'
+              : 'bg-zinc-900/80 border-zinc-800/80'
+        }`}>
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <Brain size={18} className={`transition-all duration-500 ${
+                fatigueScore > 70 ? 'text-rose-400 animate-pulse' : fatigueScore > 40 ? 'text-amber-400' : 'text-emerald-400'
+              }`} />
+              <div className="flex flex-col">
+                <span className="text-[10px] text-zinc-400 font-medium">Chỉ số Mệt mỏi (Fatigue)</span>
+                <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                  {fatigueScore}%
+                  {fatigueScore > 70 ? (
+                    <span className="text-[9px] bg-rose-500/20 text-rose-300 px-1.5 py-0.5 rounded-full font-semibold border border-rose-500/30 animate-pulse">
+                      🔥 Kiệt sức — Đang can thiệp
+                    </span>
+                  ) : fatigueScore > 40 ? (
+                    <span className="text-[9px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded-full font-semibold border border-amber-500/30">
+                      ⚠️ Cảnh báo
+                    </span>
+                  ) : (
+                    <span className="text-[9px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded-full font-semibold border border-emerald-500/30">
+                      ✅ Bình thường
+                    </span>
+                  )}
+                </span>
+              </div>
             </div>
           </div>
           
-          {/* Small progress bar */}
-          <div className="w-24 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+          {/* Full-width animated progress bar */}
+          <div className="w-full h-2 bg-zinc-800 rounded-full overflow-hidden">
             <div 
-              className={`h-full transition-all duration-500 rounded-full ${
-                fatigueScore > 70 ? 'bg-rose-500' : fatigueScore > 40 ? 'bg-amber-400' : 'bg-emerald-500'
+              className={`h-full transition-all duration-700 ease-out rounded-full ${
+                fatigueScore > 70
+                  ? 'bg-gradient-to-r from-rose-600 via-rose-400 to-red-500 shadow-[0_0_8px_rgba(244,63,94,0.6)]'
+                  : fatigueScore > 40
+                    ? 'bg-gradient-to-r from-amber-600 via-amber-400 to-yellow-400 shadow-[0_0_6px_rgba(245,158,11,0.4)]'
+                    : 'bg-gradient-to-r from-emerald-600 via-emerald-400 to-green-400 shadow-[0_0_4px_rgba(52,211,153,0.3)]'
               }`}
               style={{ width: `${fatigueScore}%` }}
             />
