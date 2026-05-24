@@ -591,6 +591,416 @@ Sau khi triển khai tất cả các thành phần Phase 3:
 
 ---
 
+## 🎬 Frontend Testing Strategy (PHASE 3 Impact)
+
+### Q: Phase 3 có phải toàn Backend code không?
+
+**Trả lời: CÓ ✅**
+
+Phase 3 **100% Backend implementation**:
+- ✅ 3a. Điều chỉnh trọng số → `backend/app/services/feed_service.py`
+- ✅ 3b. Bơm nội dung → `backend/app/services/feed_service.py` + `backend/app/repositories/video_repository.py`
+- ✅ 3c. Xếp hạng độ cường độ → `backend/app/repositories/video_repository.py`
+- ✅ 3d. E2E test → Backend kiểm thử
+
+**Frontend không cần code thêm**, nhưng **cần test lại** khi backend thay đổi!
+
+---
+
+### Frontend Regression Testing Checklist
+
+Frontend cần kiểm tra những điều sau khi Phase 3 backend được deploy:
+
+#### **1. Feed Rendering Tests** (kiểm tra feed vẫn render đúng) ✅
+
+```typescript
+// frontend/src/components/Feed.tsx - Regression Tests
+
+describe("Feed Component - Phase 3 Backend Changes", () => {
+  
+  // TEST 1: Feed vẫn load bình thường khi normal state
+  test("feed renders correctly in normal state", async () => {
+    const { videos } = await api.getFeed(userId, { limit: 5 });
+    expect(videos).toHaveLength(5);
+    expect(videos[0]).toHaveProperty("intensity_level");
+    expect(videos[0]).toHaveProperty("_id");
+  });
+
+  // TEST 2: Feed có reorder khi exhausted state (low intensity first)
+  test("feed reorders with low-intensity videos first when exhausted", async () => {
+    // Simulate exhausted state: fatigue_score > 70
+    const { videos } = await api.getFeed(userId, { limit: 5 });
+    
+    const lowIntensityVideos = videos.filter(v => v.intensity_level === "low");
+    const highIntensityVideos = videos.filter(v => v.intensity_level === "high");
+    
+    // Low intensity should appear earlier in the list
+    if (lowIntensityVideos.length > 0 && highIntensityVideos.length > 0) {
+      const lowIndex = videos.findIndex(v => v.intensity_level === "low");
+      const highIndex = videos.findIndex(v => v.intensity_level === "high");
+      expect(lowIndex).toBeLessThan(highIndex);
+    }
+  });
+
+  // TEST 3: Feed đã xem "Palette Cleanser" video (mới được bơm)
+  test("feed contains calming category video when exhausted", async () => {
+    const { videos } = await api.getFeed(userId, { limit: 5 });
+    
+    const calmingCategories = ["nature", "asmr", "lofi", "mindfulness"];
+    const hasCalmingVideo = videos.some(v => 
+      calmingCategories.includes(v.category)
+    );
+    
+    // Khi exhausted, ít nhất 1 video nên từ danh mục làm dịu
+    expect(hasCalmingVideo).toBe(true);
+  });
+
+  // TEST 4: Feed latency không tăng (performance check)
+  test("feed API response time under 500ms", async () => {
+    const startTime = performance.now();
+    await api.getFeed(userId, { limit: 5 });
+    const endTime = performance.now();
+    
+    const responseTime = endTime - startTime;
+    expect(responseTime).toBeLessThan(500); // Should be < 500ms
+  });
+});
+```
+
+---
+
+#### **2. Fatigue Score Display Tests** (UI vẫn hiển thị đúng) ✅
+
+```typescript
+// frontend/src/App.tsx - Fatigue UI Tests
+
+describe("Fatigue Score Indicator UI", () => {
+  
+  // TEST 1: Fatigue bar hiển thị đúng % khi thay đổi
+  test("fatigue score bar updates when score changes", async () => {
+    const { getByTestId } = render(<App />);
+    
+    // Initial: normal state (< 40)
+    let fatigueBar = getByTestId("fatigue-bar");
+    expect(fatigueBar).toHaveStyle({ width: "25%" }); // 25% width
+    
+    // After doomscroll: exhausted state (> 70)
+    // Wait for backend update
+    await waitFor(() => {
+      fatigueBar = getByTestId("fatigue-bar");
+      expect(fatigueBar).toHaveStyle({ width: "80%" }); // 80% width
+    });
+  });
+
+  // TEST 2: Màu sắc thay đổi theo trạng thái
+  test("fatigue bar color changes by state", async () => {
+    const { getByTestId } = render(<App />);
+    
+    let fatigueBar = getByTestId("fatigue-bar");
+    
+    // Normal: green
+    expect(fatigueBar).toHaveClass("bg-emerald-500");
+    
+    // Warning: amber
+    // (After behavior logs)
+    await waitFor(() => {
+      fatigueBar = getByTestId("fatigue-bar");
+      expect(fatigueBar).toHaveClass("bg-amber-400");
+    });
+    
+    // Exhausted: red
+    await waitFor(() => {
+      fatigueBar = getByTestId("fatigue-bar");
+      expect(fatigueBar).toHaveClass("bg-rose-500");
+    });
+  });
+
+  // TEST 3: Badge "Doomscrolling!" hiển thị khi score > 75
+  test("doomscrolling badge appears when score > 75", async () => {
+    const { queryByText } = render(<App />);
+    
+    // Initially not visible
+    expect(queryByText("Doomscrolling!")).not.toBeInTheDocument();
+    
+    // After threshold
+    await waitFor(() => {
+      expect(queryByText("Doomscrolling!")).toBeInTheDocument();
+    });
+  });
+
+  // TEST 4: Palette cleanser banner hiển thị khi exhausted
+  test("mindful intervention banner appears when mindful active", async () => {
+    const { queryByText } = render(<App />);
+    
+    await waitFor(() => {
+      expect(queryByText(/Tự động can thiệp Mindful Feed/i))
+        .toBeInTheDocument();
+    });
+  });
+});
+```
+
+---
+
+#### **3. Video Interaction Tests** (tương tác vẫn ghi nhận đúng) ✅
+
+```typescript
+// frontend/src/components/VideoCard.tsx - Interaction Tests
+
+describe("Video Interaction Tracking - Phase 3", () => {
+  
+  // TEST 1: Like button gửi tracking event đúng
+  test("like button sends interaction event", async () => {
+    const mockApi = jest.spyOn(api, "recordInteraction");
+    
+    const { getByTestId } = render(
+      <VideoCard video={mockVideo} sessionId="test_session" />
+    );
+    
+    const likeButton = getByTestId("like-button");
+    fireEvent.click(likeButton);
+    
+    expect(mockApi).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "like",
+        session_id: "test_session",
+      })
+    );
+  });
+
+  // TEST 2: Skip (swipe) gửi behavior log đúng
+  test("swipe sends behavior log with swipe_speed", async () => {
+    const mockApi = jest.spyOn(api, "recordBehaviorLog");
+    
+    const { getByTestId } = render(
+      <VideoCard video={mockVideo} sessionId="test_session" />
+    );
+    
+    // Simulate swipe (or button click for skip)
+    const skipButton = getByTestId("skip-button");
+    fireEvent.click(skipButton);
+    
+    expect(mockApi).toHaveBeenCalledWith(
+      expect.objectContaining({
+        swipe_speed: expect.any(Number),
+        watch_duration: expect.any(Number),
+      })
+    );
+  });
+
+  // TEST 3: Video không gây lỗi khi intensity_level undefined
+  test("video renders with missing intensity_level", () => {
+    const videoWithoutIntensity = { ...mockVideo };
+    delete videoWithoutIntensity.intensity_level;
+    
+    const { container } = render(
+      <VideoCard video={videoWithoutIntensity} />
+    );
+    
+    expect(container).toBeInTheDocument();
+  });
+});
+```
+
+---
+
+#### **4. Session State Tests** (session tracking vẫn đúng) ✅
+
+```typescript
+describe("Feed Session - Phase 3", () => {
+  
+  // TEST 1: Session ID không thay đổi khi load feed
+  test("same session ID throughout feed browsing", async () => {
+    const session1 = await api.createSession(userId);
+    
+    // Fetch feed multiple times
+    await api.getFeed(userId, { limit: 5 });
+    await api.getFeed(userId, { limit: 5 });
+    
+    const session2 = await api.getSession(session1.id);
+    expect(session2.id).toBe(session1.id);
+  });
+
+  // TEST 2: Video count tăng sau mỗi interaction
+  test("total_videos_watched increments after interactions", async () => {
+    const session = await api.createSession(userId);
+    const initialCount = session.total_videos_watched;
+    
+    // Record interaction
+    await api.recordInteraction({
+      user_id: userId,
+      video_id: "video_123",
+      session_id: session.id,
+      type: "like",
+    });
+    
+    const updatedSession = await api.getSession(session.id);
+    expect(updatedSession.total_videos_watched).toBeGreaterThan(initialCount);
+  });
+
+  // TEST 3: Session end time được set đúng
+  test("session end_time set when ends", async () => {
+    const session = await api.createSession(userId);
+    expect(session.ended_at).toBeNull();
+    
+    await api.endSession(session.id);
+    
+    const endedSession = await api.getSession(session.id);
+    expect(endedSession.ended_at).not.toBeNull();
+  });
+});
+```
+
+---
+
+#### **5. Integration Tests** (toàn flow từ FE) ✅
+
+```typescript
+describe("End-to-End: Frontend → Backend Phase 3", () => {
+  
+  // TEST 1: Doomscroll simulation end-to-end
+  test("complete doomscroll flow: feed → fatigue → intervention", async () => {
+    // 1. Create user & session
+    const user = await api.createUser({ tags: ["music", "gaming"] });
+    const session = await api.createSession(user.id);
+    
+    // 2. Get initial feed (normal state)
+    let feed = await api.getFeed(user.id, { limit: 5 });
+    expect(feed).toHaveLength(5);
+    
+    // 3. Simulate doomscroll: rapid interactions + behavior logs
+    for (let i = 0; i < 8; i++) {
+      await api.recordBehaviorLog({
+        user_id: user.id,
+        session_id: session.id,
+        video_id: feed[0].id,
+        swipe_speed: 900, // Fast swipe
+        watch_duration: 1.5, // Short watch
+        is_interaction: false, // Passive scroll
+      });
+    }
+    
+    // 4. Wait for backend to update fatigue
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // 5. Check session state changed to "exhausted"
+    const updatedSession = await api.getSession(session.id);
+    expect(updatedSession.adaptive_state).toBe("exhausted");
+    expect(updatedSession.fatigue_score).toBeGreaterThan(70);
+    
+    // 6. Get new feed (should have low-intensity prioritized)
+    feed = await api.getFeed(user.id, { limit: 5 });
+    
+    // 7. Verify low-intensity appears first
+    const lowIntensityVideos = feed.filter(v => v.intensity_level === "low");
+    expect(lowIntensityVideos.length).toBeGreaterThan(0);
+    expect(feed[0].intensity_level).toBe("low");
+  });
+
+  // TEST 2: Palette cleanser video exists in exhausted feed
+  test("palette cleanser video appears in exhausted state feed", async () => {
+    // ... setup doomscroll as above ...
+    
+    const feed = await api.getFeed(user.id, { limit: 5 });
+    
+    const calmingVideo = feed.find(v => 
+      ["nature", "asmr", "lofi", "mindfulness"].includes(v.category)
+    );
+    
+    expect(calmingVideo).toBeDefined();
+    expect(calmingVideo.intensity_level).toBe("low");
+  });
+});
+```
+
+---
+
+### Frontend Component Changes (OPTIONAL - Enhancements)
+
+Nếu FE muốn polish thêm khi Phase 3 backend activate:
+
+#### **Option A: Show Intensity Label on Videos**
+```tsx
+// frontend/src/components/VideoCard.tsx
+
+export const VideoCard = ({ video }) => {
+  const getIntensityBadge = (level: string) => {
+    const colors = {
+      low: "bg-emerald-500/20 text-emerald-300",
+      medium: "bg-amber-500/20 text-amber-300",
+      high: "bg-rose-500/20 text-rose-300",
+    };
+    return colors[level] || colors.medium;
+  };
+
+  return (
+    <div>
+      {/* Video player */}
+      
+      {/* Intensity badge - NEW */}
+      <div className={`absolute top-2 left-2 px-2 py-1 rounded text-xs font-semibold ${getIntensityBadge(video.intensity_level)}`}>
+        {video.intensity_level === "low" ? "🍃 Yên bình" : 
+         video.intensity_level === "medium" ? "⚡ Bình thường" : 
+         "🔥 Kích thích"}
+      </div>
+    </div>
+  );
+};
+```
+
+#### **Option B: Inject Palette Cleanser Badge**
+```tsx
+// frontend/src/components/Feed.tsx
+
+const isPaletteCleanser = (video: Video) => {
+  return ["nature", "asmr", "lofi", "mindfulness"].includes(video.category);
+};
+
+// In feed render:
+{videos.map((video, idx) => (
+  <div key={video.id} className="relative">
+    {isPaletteCleanser(video) && (
+      <div className="absolute top-4 right-4 z-10 bg-emerald-500/90 px-3 py-1 rounded-full text-xs font-bold text-white">
+        🍃 Nội dung yên bình
+      </div>
+    )}
+    <VideoCard video={video} />
+  </div>
+))}
+```
+
+---
+
+### Test Execution Guide
+
+1. **Backend Phase 3 Deploy** (2h 5 phút)
+   - Implement 3a, 3b, 3c, 3d
+   - Run backend tests: ✅ All pass
+
+2. **Frontend Regression Testing** (1h)
+   ```bash
+   # Run all tests
+   cd frontend
+   npm test -- --coverage
+   
+   # Check:
+   # ✅ Feed.test.tsx
+   # ✅ VideoCard.test.tsx  
+   # ✅ App.integration.test.tsx
+   ```
+
+3. **Manual E2E Testing** (30 phút)
+   - Start local: FE (port 5173) + BE (port 8000)
+   - Simulate doomscroll path
+   - Verify:
+     - [ ] Feed reorders when exhausted
+     - [ ] Fatigue bar color changes
+     - [ ] Palette cleanser video appears
+     - [ ] No console errors
+     - [ ] Performance OK (< 500ms API calls)
+
+---
+
 ## 📌 Ghi chú
 
 - **Phase 2 sẵn sàng production** — Tất cả tín hiệu được theo dõi, mệt mỏi tính toán đúng
@@ -598,4 +1008,5 @@ Sau khi triển khai tất cả các thành phần Phase 3:
 - **Kiểm thử E2E xác thực luồng end-to-end** — Sau triển khai, kiểm thử hồi quy đầy đủ có sẵn
 - **Không cần thay đổi schema cơ sở dữ liệu** — Tất cả trường đã tồn tại (intensity_level, adaptive_state, v.v.)
 - **Tương thích ngược** — Trạng thái bình thường hoạt động chính xác giống Phase 1
+- **Frontend không code thêm** — Chỉ cần regression testing + optional polish
 
