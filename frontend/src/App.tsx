@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { connectSessionWS, disconnectSessionWS } from './hooks/useVideoStats';
 import { Feed } from './components/Feed';
 import { BottomNav } from './components/BottomNav';
@@ -108,14 +108,21 @@ function App() {
   const [isMindfulActive, setIsMindfulActive] = useState(false);
 
   // Pagination / Infinite Scroll states
-  const [feedLimit, setFeedLimit] = useState(10);
-  const [trendingLimit, setTrendingLimit] = useState(10);
+  // feedLimit is kept CONSTANT — backend dedup ($nin seen_video_ids) ensures each
+  // mutateFeed() call returns a fresh batch of BATCH_SIZE videos never seen before.
+  const BATCH_SIZE = 5;
+  const [feedLimit] = useState(BATCH_SIZE);
+  const [trendingLimit, setTrendingLimit] = useState(BATCH_SIZE);
 
   const [swipeTrigger, setSwipeTrigger] = useState<{ direction: 'up' | 'down'; speed: 'slow' | 'fast'; timestamp: number } | null>(null);
 
   const triggerSwipe = (direction: 'up' | 'down', speed: 'slow' | 'fast') => {
     setSwipeTrigger({ direction, speed, timestamp: Date.now() });
   };
+
+  // hasFetchedNextBatch: prevents triggering multiple fetches for the same batch.
+  // It is reset inside Feed whenever the videos array grows (new batch arrived).
+  const hasFetchedNextBatch = useRef(false);
 
   // Fetch feed based on auth state
   const { videos: apiVideos, mutate: mutateFeed } = usePersonalizedFeed(user ? user.id : null, feedLimit);
@@ -145,9 +152,12 @@ function App() {
   useEffect(() => {
     if (currentVideos && currentVideos.length > 0) {
       setAccumulatedVideos(prev => {
-        // Append only unique new videos
         const newVids = currentVideos.filter(cv => !prev.find(p => p.id === cv.id));
-        return [...prev, ...newVids];
+        if (newVids.length > 0) {
+          // New batch arrived → reset the guard so the next batch can be fetched
+          hasFetchedNextBatch.current = false;
+        }
+        return newVids.length > 0 ? [...prev, ...newVids] : prev;
       });
     }
   }, [currentVideos]);
@@ -208,8 +218,8 @@ function App() {
   // Reset accumulated videos and limits on user login/logout
   useEffect(() => {
     setAccumulatedVideos([]);
-    setFeedLimit(10);
-    setTrendingLimit(10);
+    // feedLimit is constant (BATCH_SIZE), no need to reset it
+    setTrendingLimit(BATCH_SIZE);
   }, [user?.id]);
 
   const handleLoginSuccess = async (userData: { id: string; username: string }, token: string) => {
@@ -217,16 +227,6 @@ function App() {
     setAccessToken(token);
     localStorage.setItem('user', JSON.stringify(userData));
     localStorage.setItem('access_token', token);
-    
-    try {
-      const session = await startSession(userData.id);
-      setSessionId(session.id);
-      localStorage.setItem('session_id', session.id);
-      connectSessionWS(session.id);
-      await refreshSessionStats(session.id);
-    } catch (error) {
-      console.error('Failed to start session on login:', error);
-    }
   };
 
   const handleRegisterSuccess = async (userData: { id: string; username: string }, token: string) => {
@@ -234,16 +234,6 @@ function App() {
     setAccessToken(token);
     localStorage.setItem('user', JSON.stringify(userData));
     localStorage.setItem('access_token', token);
-    
-    try {
-      const session = await startSession(userData.id);
-      setSessionId(session.id);
-      localStorage.setItem('session_id', session.id);
-      connectSessionWS(session.id);
-      await refreshSessionStats(session.id);
-    } catch (error) {
-      console.error('Failed to start session on register:', error);
-    }
   };
 
   const handleLogout = async () => {
@@ -314,7 +304,7 @@ function App() {
         setFatigueScore(0);
         setIsMindfulActive(false);
         setAccumulatedVideos([]);
-        setFeedLimit(10);
+        // feedLimit is constant (BATCH_SIZE), no setter needed
         mutateFeed();
       } catch (error) {
         console.error('Error resetting session:', error);
@@ -323,7 +313,7 @@ function App() {
       setFatigueScore(25);
       setIsMindfulActive(false);
       setAccumulatedVideos([]);
-      setTrendingLimit(10);
+      setTrendingLimit(BATCH_SIZE);
       mutateTrending();
     }
   };
@@ -459,16 +449,17 @@ function App() {
             onRefreshSessionStats={refreshSessionStats}
             swipeTrigger={swipeTrigger}
             onLoadMore={() => {
+              if (hasFetchedNextBatch.current) return; // already fetching this batch
+              hasFetchedNextBatch.current = true;
               if (user) {
-                setFeedLimit(prev => {
-                  if (accumulatedVideos.length < prev) return prev;
-                  return prev + 10;
-                });
+                // feedLimit stays constant (BATCH_SIZE=5). mutateFeed() re-fetches
+                // /feed?limit=5 and the backend's $nin dedup filter guarantees
+                // a fresh batch of videos never seen in this session.
+                mutateFeed();
               } else {
-                setTrendingLimit(prev => {
-                  if (accumulatedVideos.length < prev) return prev;
-                  return prev + 10;
-                });
+                // Trending has no session-based dedup on BE → still increase limit
+                // so the endpoint returns more results for FE to filter duplicates.
+                setTrendingLimit(prev => prev + BATCH_SIZE);
               }
             }}
           />

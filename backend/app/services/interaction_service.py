@@ -289,37 +289,15 @@ class InteractionService:
     async def record_behavior_log(self, data: BehaviorLogCreate) -> BehaviorLogResponse:
         """
         Record raw behavior for a single video view.
-        Used by fatigue engine — does NOT update interest_vector.
-
-        Also updates session intensity counters if video intensity is known.
+        Non-blocking: Immediately returns 201 Created and pushes DB insert to background.
         """
-        # Lookup consecutive same-topic count from recent logs
-        # số lần lặp lại của 1 topic trong 10 log gần nhất 
-        consecutive = await self._log_repo.get_consecutive_topic_count(
-            data.session_id, data.topic, limit=10
-        )
-
         now = datetime.utcnow()
-        log_doc = BehaviorLogInDB(
-            user_id=data.user_id,
-            session_id=data.session_id,
-            video_id=data.video_id,
-            timestamp=now,
-            swipe_speed=data.swipe_speed,
-            watch_duration=data.watch_duration,
-            is_interaction=data.is_interaction,
-            topic=data.topic,
-            consecutive_same_topic=consecutive,
-        )
+        log_id = str(ObjectId())
 
-        # lưu behavior_log
-        log_id = await self._log_repo.insert_one(log_doc.model_dump())
+        # Fire and forget the actual insertion and metric updates
+        asyncio.create_task(self._process_behavior_log_background(data, log_id, now))
 
-        # Update session ensity counters and calculate fatigue (fire-and-forget)
-        asyncio.create_task(
-            self._update_session_metrics_pipeline(data.session_id, data.video_id)
-        )
-
+        # Return immediately to client to prevent blocking
         return BehaviorLogResponse(
             id=log_id,
             user_id=data.user_id,
@@ -330,8 +308,38 @@ class InteractionService:
             watch_duration=data.watch_duration,
             is_interaction=data.is_interaction,
             topic=data.topic,
-            consecutive_same_topic=consecutive,
+            consecutive_same_topic=0,  # Computed in background, return default for speed
         )
+
+    async def _process_behavior_log_background(self, data: BehaviorLogCreate, log_id: str, now: datetime) -> None:
+        """Background worker for behavior logs."""
+        try:
+            # 1. Calculate consecutive topics
+            consecutive = await self._log_repo.get_consecutive_topic_count(
+                data.session_id, data.topic, limit=10
+            )
+
+            # 2. Insert to DB
+            log_doc = BehaviorLogInDB(
+                user_id=data.user_id,
+                session_id=data.session_id,
+                video_id=data.video_id,
+                timestamp=now,
+                swipe_speed=data.swipe_speed,
+                watch_duration=data.watch_duration,
+                is_interaction=data.is_interaction,
+                topic=data.topic,
+                consecutive_same_topic=consecutive,
+            )
+            
+            log_dict = log_doc.model_dump()
+            log_dict["_id"] = ObjectId(log_id)
+            await self._log_repo.insert_one(log_dict)
+
+            # 3. Update session metrics pipeline
+            await self._update_session_metrics_pipeline(data.session_id, data.video_id)
+        except Exception as exc:
+            logger.error(f"Failed to process behavior log in background (id={log_id}): {exc}")
 
     async def _update_session_metrics_pipeline(self, session_id: str, video_id: str) -> None:
         """Update session intensity counters first, then compute fatigue score and state."""
