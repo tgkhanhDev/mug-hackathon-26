@@ -42,7 +42,6 @@ Với vai trò Project Manager, dưới đây là tài liệu quản lý tiến 
 * **Xử lý MongoDB:** Sử dụng **Aggregation Pipeline** và Time-series logs để tổng hợp và tính toán chỉ số `Fatigue Score` (Ví dụ: Hệ thống phát hiện Fatigue Score = 82/100).
 
 ### PHASE 3 — Mindful Feed Injection (The Intervention)
-**Mục tiêu:** Can thiệp khéo léo để bảo vệ người dùng, hay còn gọi là *Adaptive Recommendation*.
 * **Khi Fatigue Score tăng cao:**
   * Recommendation Engine **KHÔNG** dừng việc cá nhân hóa, mà thay đổi chiến lược:
     1. **Re-rank feed:** Sắp xếp lại thứ tự ưu tiên video.

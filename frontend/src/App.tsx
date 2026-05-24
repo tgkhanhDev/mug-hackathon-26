@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { connectSessionWS, disconnectSessionWS } from './hooks/useVideoStats';
 import { Feed } from './components/Feed';
 import { BottomNav } from './components/BottomNav';
 import { AuthPopup } from './components/AuthPopup';
@@ -194,10 +195,12 @@ function App() {
         .then((session) => {
           setSessionId(session.id);
           localStorage.setItem('session_id', session.id);
+          connectSessionWS(session.id);
           refreshSessionStats(session.id);
         })
         .catch(console.error);
     } else if (sessionId) {
+      connectSessionWS(sessionId);
       refreshSessionStats(sessionId);
     }
   }, [user]);
@@ -219,6 +222,7 @@ function App() {
       const session = await startSession(userData.id);
       setSessionId(session.id);
       localStorage.setItem('session_id', session.id);
+      connectSessionWS(session.id);
       await refreshSessionStats(session.id);
     } catch (error) {
       console.error('Failed to start session on login:', error);
@@ -235,6 +239,7 @@ function App() {
       const session = await startSession(userData.id);
       setSessionId(session.id);
       localStorage.setItem('session_id', session.id);
+      connectSessionWS(session.id);
       await refreshSessionStats(session.id);
     } catch (error) {
       console.error('Failed to start session on register:', error);
@@ -242,6 +247,7 @@ function App() {
   };
 
   const handleLogout = async () => {
+    disconnectSessionWS();
     if (sessionId) {
       try {
         await endSession(sessionId);
@@ -299,10 +305,12 @@ function App() {
   const resetSession = async () => {
     if (user && sessionId) {
       try {
+        disconnectSessionWS();
         await endSession(sessionId);
         const newSession = await startSession(user.id);
         setSessionId(newSession.id);
         localStorage.setItem('session_id', newSession.id);
+        connectSessionWS(newSession.id);
         setFatigueScore(0);
         setIsMindfulActive(false);
         setAccumulatedVideos([]);
