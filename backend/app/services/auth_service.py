@@ -117,6 +117,8 @@ class AuthService:
             refresh_token=refresh_token,
             token_type="bearer",
             expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            user_id=user_id,
+            username=username,
         )
 
     @staticmethod

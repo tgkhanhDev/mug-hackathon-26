@@ -1,8 +1,9 @@
-import React, { useRef, useState, useEffect } from 'react';
-import { Heart, MessageCircle, Share2, Bookmark, Music } from 'lucide-react';
+import React, { useRef, useState, useEffect, useContext } from 'react';
+import { Heart, MessageCircle, Bookmark, Share2, Music } from 'lucide-react';
 import { useInView } from 'react-intersection-observer';
 import { useVideoStats } from '../hooks/useVideoStats';
 import { sendInteraction, sendBehaviorLog } from '../api/client';
+import { AuthContext } from '../context/AuthContext';
 
 interface VideoCardProps {
   videoUrl: string;
@@ -16,6 +17,10 @@ interface VideoCardProps {
   isActive: boolean;
   videoId: string;
   topic: string;
+  userId: string | null;
+  sessionId: string | null;
+  onRefreshSessionStats: (activeSessionId?: string | null) => Promise<void>;
+  swipeSpeed: number;
 }
 
 export const VideoCard: React.FC<VideoCardProps> = ({
@@ -29,13 +34,24 @@ export const VideoCard: React.FC<VideoCardProps> = ({
   bookmarks,
   isActive,
   videoId,
-  topic
+  topic,
+  userId,
+  sessionId,
+  onRefreshSessionStats,
+  swipeSpeed
 }) => {
   const { ref: inViewRef, inView } = useInView({ threshold: 0.7 });
+  const { isAuthenticated, openAuthModal } = useContext(AuthContext);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLiked, setIsLiked] = useState(false);
-  const [hasViewed, setHasViewed] = useState(false);
+  const [hasCommented, setHasCommented] = useState(false);
+  const [isProcessingLike, setIsProcessingLike] = useState(false);
+  const [isProcessingComment, setIsProcessingComment] = useState(false);
+  const [replayCount, setReplayCount] = useState(0);
+
+  const activeStartTimeRef = useRef<number | null>(null);
+  const replayCountRef = useRef(0);
 
   // Combine refs (intersection observer + video element)
   const setRefs = (node: HTMLVideoElement) => {
@@ -50,16 +66,43 @@ export const VideoCard: React.FC<VideoCardProps> = ({
   );
 
   useEffect(() => {
-    if (inView && !hasViewed) {
-      setHasViewed(true);
-      sendBehaviorLog(videoId, topic);
-    }
-  }, [inView, hasViewed, videoId, topic]);
+    replayCountRef.current = replayCount;
+  }, [replayCount]);
+
+  // Keep latest parameters in ref to access in cleanup without triggering effect re-runs
+  const logParamsRef = useRef({
+    userId,
+    sessionId,
+    videoId,
+    topic,
+    isLiked,
+    hasCommented,
+    swipeSpeed
+  });
+
+  useEffect(() => {
+    logParamsRef.current = {
+      userId,
+      sessionId,
+      videoId,
+      topic,
+      isLiked,
+      hasCommented,
+      swipeSpeed
+    };
+  }, [userId, sessionId, videoId, topic, isLiked, hasCommented, swipeSpeed]);
 
   useEffect(() => {
     if (isActive) {
-      videoRef.current?.play();
       setIsPlaying(true);
+      activeStartTimeRef.current = Date.now();
+      const playPromise = videoRef.current?.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((error) => {
+          console.warn("Autoplay was prevented by browser policy:", error);
+          setIsPlaying(false);
+        });
+      }
     } else {
       videoRef.current?.pause();
       if (videoRef.current) {
@@ -67,18 +110,115 @@ export const VideoCard: React.FC<VideoCardProps> = ({
       }
       setIsPlaying(false);
     }
+
+    return () => {
+      // Cleanup runs when card becomes inactive or unmounts
+      if (activeStartTimeRef.current !== null) {
+        const duration = (Date.now() - activeStartTimeRef.current) / 1000;
+        activeStartTimeRef.current = null;
+        
+        const params = logParamsRef.current;
+        if (params.userId && params.sessionId) {
+          const wasInteracted = params.isLiked || params.hasCommented || replayCountRef.current > 0;
+          
+          sendBehaviorLog(
+            params.videoId,
+            params.topic,
+            params.userId,
+            params.sessionId,
+            params.swipeSpeed,
+            duration,
+            wasInteracted
+          ).then(() => {
+            onRefreshSessionStats();
+          });
+
+          // Removed default interactions (skip/passive_view) as requested.
+          // Only explicit user actions will trigger sendInteraction now.
+        }
+      }
+    };
   }, [isActive]);
 
-  const handleLike = () => {
+  const handleLike = async () => {
+    if (!isAuthenticated) {
+      openAuthModal();
+      return;
+    }
+    if (isProcessingLike) return; // blocking state
+    
     const newLikedState = !isLiked;
     setIsLiked(newLikedState);
     if (newLikedState) {
-      sendInteraction(videoId, 'like', 0.8);
+      setIsProcessingLike(true);
+      try {
+        await sendInteraction(
+          videoId, 
+          'like', 
+          0.8, 
+          userId || undefined, 
+          sessionId || undefined
+        );
+      } finally {
+        setIsProcessingLike(false);
+      }
     }
   };
 
-  const handleComment = () => {
-    sendInteraction(videoId, 'comment', 0.5);
+  const handleComment = async () => {
+    if (!isAuthenticated) {
+      openAuthModal();
+      return;
+    }
+    if (hasCommented || isProcessingComment) return; // block if already commented or processing
+    
+    setHasCommented(true);
+    setIsProcessingComment(true);
+    try {
+      await sendInteraction(
+        videoId, 
+        'comment', 
+        0.5, 
+        userId || undefined, 
+        sessionId || undefined
+      );
+    } finally {
+      setIsProcessingComment(false);
+    }
+  };
+
+  const previousTimeRef = useRef(0);
+
+  const handleTimeUpdate = () => {
+    if (!videoRef.current) return;
+    const currentTime = videoRef.current.currentTime;
+    const duration = videoRef.current.duration;
+    
+    // Detect loop: if time jumps back from near the end to the beginning
+    if (duration > 0 && previousTimeRef.current > duration - 1 && currentTime < 1) {
+      handleVideoEnded();
+    }
+    previousTimeRef.current = currentTime;
+  };
+
+  const handleVideoEnded = () => {
+    setReplayCount(prev => prev + 1);
+    if (videoRef.current && !videoRef.current.loop) {
+      videoRef.current.currentTime = 0;
+      videoRef.current.play().catch(console.error);
+    }
+    if (userId && sessionId) {
+      sendInteraction(
+        videoId,
+        'replay',
+        1.0,
+        userId,
+        sessionId,
+        videoRef.current?.duration || 10,
+        swipeSpeed,
+        replayCount + 1
+      );
+    }
   };
 
   const togglePlay = () => {
@@ -86,8 +226,14 @@ export const VideoCard: React.FC<VideoCardProps> = ({
       videoRef.current?.pause();
       setIsPlaying(false);
     } else {
-      videoRef.current?.play();
       setIsPlaying(true);
+      const playPromise = videoRef.current?.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((error) => {
+          console.error("Playback failed:", error);
+          setIsPlaying(false);
+        });
+      }
     }
   };
 
@@ -104,10 +250,12 @@ export const VideoCard: React.FC<VideoCardProps> = ({
         ref={setRefs}
         src={videoUrl}
         className="w-full h-full object-cover"
-        loop
         muted={false}
         onClick={togglePlay}
+        onEnded={handleVideoEnded}
+        onTimeUpdate={handleTimeUpdate}
         playsInline
+        loop
       />
       
       {/* Overlay controls - only show when paused */}

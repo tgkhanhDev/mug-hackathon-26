@@ -61,6 +61,8 @@ class TokenResponse(BaseModel):
     refresh_token: str = Field(..., description="JWT refresh token")
     token_type: str = Field(default="bearer", description="Token type")
     expires_in: int = Field(..., description="Access token TTL in seconds")
+    user_id: str = Field(..., description="MongoDB ObjectId of the user as string")
+    username: str = Field(..., description="Username of the user")
 
 
 class RefreshTokenRequest(BaseModel):
