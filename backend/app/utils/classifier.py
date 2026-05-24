@@ -186,6 +186,69 @@ CATEGORY_KEYWORDS = {
         "phuot", "di choi", "tham my", "nha cua", "trang tri", "mua sam", "thoi trang",
         "phoi do", "don dep", "cham soc da", "trang diem", "lam dep", "quan ca phe",
         "review an uong", "nhat ky cuoc song"
+    ],
+    "animals": [
+        # English
+        "animal", "animals", "pet", "pets", "dog", "dogs", "cat", "cats", "wildlife",
+        "bird", "birds", "zoo", "veterinarian", "puppy", "kitten", "mammal",
+        # Vietnamese Accented
+        "động vật", "thú cưng", "thú hoang", "chó mèo", "chó", "mèo", "chim", "thú",
+        # Vietnamese Unaccented
+        "dong vat", "thu cung", "thu hoang", "cho meo", "cho", "meo", "chim", "thu"
+    ],
+    "art": [
+        # English
+        "art", "painting", "drawing", "diy", "craft", "creative", "sculpture", "sketch",
+        "designer", "digital art", "crafting", "museum", "gallery", "illustration",
+        # Vietnamese Accented
+        "nghệ thuật", "mỹ thuật", "hội họa", "vẽ", "thủ công", "sáng tạo", "điêu khắc",
+        # Vietnamese Unaccented
+        "nghe thuat", "my thuat", "hoi hoa", "ve", "thu cong", "sang tao", "dieu khac"
+    ],
+    "music": [
+        # English
+        "music", "song", "songs", "instrument", "guitar", "piano", "concert", "singing",
+        "melody", "musician", "vocals", "band", "rhythm", "audio", "track",
+        # Vietnamese Accented
+        "âm nhạc", "nhạc", "bài hát", "ca khúc", "nhạc cụ", "guitar", "piano", "hòa nhạc", "ca hát",
+        # Vietnamese Unaccented
+        "am nhac", "nhac", "bai hat", "ca khuc", "nhac cu", "hoa nhac", "ca hat"
+    ],
+    "comedy": [
+        # English
+        "comedy", "funny", "joke", "jokes", "prank", "pranks", "humor", "hilarious",
+        "lol", "laugh", "laughing", "meme", "memes", "comedian",
+        # Vietnamese Accented
+        "hài hước", "hài", "trò đùa", "tếu táo", "cười", "ảnh chế", "diễn viên hài",
+        # Vietnamese Unaccented
+        "hai huoc", "hai", "tro dua", "teu tao", "cuoi", "anh che", "dien vien hai"
+    ],
+    "fashion": [
+        # English
+        "fashion", "style", "outfit", "model", "runway", "clothing", "makeup",
+        "beauty", "streetwear", "wardrobe", "designer clothing", "cosmetics",
+        # Vietnamese Accented
+        "thời trang", "phối đồ", "người mẫu", "làm đẹp", "trang điểm", "quần áo", "phong cách",
+        # Vietnamese Unaccented
+        "thoi trang", "phoi do", "nguoi mau", "lam dep", "trang diem", "quan ao", "phong cach"
+    ],
+    "automotive": [
+        # English
+        "automotive", "car", "cars", "motorcycle", "bike", "driving", "drift", "racing",
+        "supercar", "vehicle", "auto", "engine", "highway", "garage",
+        # Vietnamese Accented
+        "xe hơi", "ô tô", "xe máy", "đua xe", "lái xe", "phương tiện", "siêu xe",
+        # Vietnamese Unaccented
+        "xe hoi", "o to", "xe may", "dua xe", "lai xe", "phuong tien", "sieu xe"
+    ],
+    "space": [
+        # English
+        "space", "galaxy", "universe", "stars", "planet", "planets", "astronomy", "nasa",
+        "cosmic", "astronaut", "nebula", "telescope", "outer space",
+        # Vietnamese Accented
+        "vũ trụ", "thiên văn", "ngôi sao", "hành tinh", "dải ngân hà", "phi hành gia",
+        # Vietnamese Unaccented
+        "vu tru", "thien van", "ngoi sao", "hanh tinh", "dai ngan ha", "phi hanh gia"
     ]
 }
 
@@ -198,7 +261,14 @@ CATEGORY_DEFAULT_TAGS = {
     "nature": ["nature", "travel", "outdoors", "beautiful", "scenery", "landscape"],
     "education": ["education", "learning", "tutorial", "knowledge", "science", "guide"],
     "entertainment": ["entertainment", "funny", "music", "video", "meme", "comedy"],
-    "lifestyle": ["lifestyle", "vlog", "aesthetic", "daily", "routine", "travel"]
+    "lifestyle": ["lifestyle", "vlog", "aesthetic", "daily", "routine", "travel"],
+    "animals": ["animals", "pets", "wildlife", "cute", "dogs", "cats"],
+    "art": ["art", "creative", "painting", "craft", "design", "diy"],
+    "music": ["music", "song", "melody", "instrument", "concert", "singer"],
+    "comedy": ["comedy", "funny", "humor", "joke", "meme", "laugh"],
+    "fashion": ["fashion", "style", "outfit", "beauty", "model", "makeup"],
+    "automotive": ["automotive", "cars", "driving", "racing", "vehicles", "supercar"],
+    "space": ["space", "galaxy", "universe", "stars", "cosmic", "planets"]
 }
 
 # Stopwords for filtering tokens during heuristic tag extraction
@@ -517,14 +587,14 @@ async def heuristic_predict(description: str, title: str = "") -> Tuple[str, Lis
             best_category = "entertainment"  # Default fallback
 
     # 2. Determine predicted_intensity based on category
-    # gaming, sports, entertainment -> high
-    # cooking, lifestyle, education -> medium
-    # calming, nature -> low
-    if best_category in ["gaming", "sports", "entertainment"]:
+    # gaming, sports, entertainment, comedy, automotive -> high
+    # cooking, lifestyle, education, art, music, fashion -> medium
+    # calming, nature, animals, space -> low
+    if best_category in ["gaming", "sports", "entertainment", "comedy", "automotive"]:
         predicted_intensity = "high"
-    elif best_category in ["cooking", "lifestyle", "education"]:
+    elif best_category in ["cooking", "lifestyle", "education", "art", "music", "fashion"]:
         predicted_intensity = "medium"
-    else:  # calming, nature
+    else:  # calming, nature, animals, space
         predicted_intensity = "low"
 
     # Override intensity based on specific trigger words

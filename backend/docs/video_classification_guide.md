@@ -7,7 +7,7 @@ Tài liệu này giải thích chi tiết cơ chế hoạt động, thiết kế
 ## 1. Tổng Quan Hệ Thống
 
 Hệ thống phân loại tự động giúp giảm tải thao tác cho người dùng và người kiểm duyệt nội dung. Khi một video được tạo thông qua API mà không truyền thông tin phân loại, hệ thống sẽ sử dụng mô hình trí tuệ nhân tạo (cục bộ) để phân tích văn bản tiêu đề + mô tả nhằm:
-1. **Dự đoán Category (Một nhóm duy nhất):** Chọn 1 trong 8 nhóm chính thuộc `CATEGORY_ENUM` (`lifestyle`, `education`, `entertainment`, `sports`, `calming`, `nature`, `gaming`, `cooking`).
+1. **Dự đoán Category (Một nhóm duy nhất):** Chọn 1 trong 15 nhóm chính thuộc `CATEGORY_ENUM` (`lifestyle`, `education`, `entertainment`, `sports`, `calming`, `nature`, `gaming`, `cooking`, `animals`, `art`, `music`, `comedy`, `fashion`, `automotive`, `space`).
 2. **Dự đoán Tags (Nhiều thẻ phân loại):** Đề xuất danh sách thẻ tag phù hợp (tối đa 8 tags) dựa trên kho từ vựng thẻ hiện có trong database.
 
 Hệ thống hoạt động hoàn toàn cục bộ (offline) trên máy chủ backend sử dụng thư viện **`scikit-learn`** để đảm bảo chi phí bằng 0 và tốc độ xử lý nhanh nhất có thể.
@@ -51,9 +51,9 @@ Trong hệ thống của chúng ta:
 * Kích hoạt `sublinear_tf=True` (áp dụng thang đo logarit cho tần số từ) để giảm bớt ảnh hưởng của các từ lặp lại quá nhiều lần trong một đoạn mô tả ngắn.
 
 ### B. Phân Loại Danh Mục (Category Classifier)
-* **Tính chất:** Phân loại đa lớp (Multiclass Classification) - mỗi video chỉ thuộc đúng một trong 8 danh mục duy nhất.
+* **Tính chất:** Phân loại đa lớp (Multiclass Classification) - mỗi video chỉ thuộc đúng một trong 15 danh mục duy nhất.
 * **Thuật toán:** `LogisticRegression` kết hợp tham số `class_weight="balanced"` để tự động điều chỉnh trọng số phạt đối với các danh mục có ít dữ liệu mẫu, tránh việc mô hình bị thiên lệch (bias) về phía danh mục có nhiều video nhất.
-* **Hoạt động:** Mô hình tính toán xác suất đầu ra cho từng danh mục trong số 8 danh mục, danh mục nào có xác suất cao nhất sẽ được lựa chọn.
+* **Hoạt động:** Mô hình tính toán xác suất đầu ra cho từng danh mục trong số 15 danh mục, danh mục nào có xác suất cao nhất sẽ được lựa chọn.
 
 ### C. Phân Loại Thẻ Tag (Tags Classifier - Binary Relevance)
 * **Tính chất:** Phân loại đa nhãn (Multilabel Classification) - một video có thể có nhiều tag khác nhau cùng lúc.
@@ -73,7 +73,7 @@ Khi hệ thống mới thiết lập (chưa có tệp mô hình `.pkl` do thiế
 * **Mô hình:** `MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7` (Hỗ trợ phân loại tiếng Việt cực tốt mà không cần huấn luyện trước).
 * **Endpoint:** `https://router.huggingface.co/hf-inference/models/MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7/pipeline/zero-shot-classification` (Sử dụng cổng router chính thức của Hugging Face).
 * **Token:** Được cấu hình qua khóa `HF_API_TOKEN` trong file `.env`.
-* **Cơ chế phân loại:** Mô hình tính toán độ tương đồng giữa văn bản (tiêu đề + mô tả) và danh sách 8 danh mục chính (`CATEGORY_ENUM`).
+* **Cơ chế phân loại:** Mô hình tính toán độ tương đồng giữa văn bản (tiêu đề + mô tả) và danh sách 15 danh mục chính (`CATEGORY_ENUM`).
 * **Tính tương thích định dạng:** Trình phân tích kết quả hỗ trợ linh hoạt cả cấu trúc danh sách từ điển nhị phân `[{"label": "...", "score": ...}, ...]` lẫn cấu trúc từ điển chứa mảng nhãn `{"labels": [...], "scores": [...]}` để tránh crash khi cấu trúc API thay đổi.
 * **Cơ chế tải lại (Retry):** Nếu mô hình đang được nạp trên HF Serverless (lỗi 503), hệ thống sẽ tự động chờ tối đa 3 lần dựa trên thời gian ước tính `estimated_time` của API để hoàn tất yêu cầu.
 
@@ -148,7 +148,7 @@ Client Request (Omitted Category & Tags)
   "success": true,
   "n_samples": 93,
   "category_accuracy": 0.989247311827957,
-  "num_categories": 8,
+  "num_categories": 15,
   "num_tags": 127
 }
 ```

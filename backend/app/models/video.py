@@ -14,7 +14,10 @@ from pydantic import BaseModel, Field
 CATEGORY_ENUM = [
     "lifestyle", "education", "entertainment", "sports",
     "calming", "nature", "gaming", "cooking",
+    "animals", "art", "music", "comedy",
+    "fashion", "automotive", "space",
 ]
+
 
 INTENSITY_ENUM = ["high", "medium", "low"]
 

@@ -45,6 +45,13 @@ PRESET_TASKS = [
     {"query": "programming", "category": "education", "intensity_level": "medium"},
     {"query": "travel", "category": "lifestyle", "intensity_level": "medium"},
     {"query": "dance", "category": "entertainment", "intensity_level": "high"},
+    {"query": "animals", "category": "animals", "intensity_level": "low"},
+    {"query": "art", "category": "art", "intensity_level": "medium"},
+    {"query": "music", "category": "music", "intensity_level": "medium"},
+    {"query": "funny", "category": "comedy", "intensity_level": "high"},
+    {"query": "fashion", "category": "fashion", "intensity_level": "medium"},
+    {"query": "cars", "category": "automotive", "intensity_level": "high"},
+    {"query": "space", "category": "space", "intensity_level": "low"},
 ]
 
 
@@ -267,8 +274,8 @@ def main():
     parser.add_argument(
         "--limit",
         type=int,
-        default=5,
-        help="Number of videos to fetch and save per topic (default: 5)"
+        default=10,
+        help="Number of videos to fetch and save per topic (default: 10)"
     )
     parser.add_argument(
         "--creator-id",
