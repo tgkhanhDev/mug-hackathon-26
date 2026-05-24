@@ -5,7 +5,7 @@ Stub endpoints for register/login/refresh. Ready for Stage 2 integration.
 No auth middleware applied yet (Day 1 = open endpoints).
 """
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, status, Depends
 
 from app.models.auth import (
     LoginRequest,
@@ -26,9 +26,8 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
     description="Register with username, password, and 2 interest tags. "
     "Returns JWT access + refresh token pair.",
 )
-async def register(data: RegisterRequest):
+async def register(data: RegisterRequest, service: AuthService = Depends()):
     """POST /api/v1/auth/register — Register and get tokens."""
-    service = AuthService()
     return await service.register(data)
 
 
@@ -39,9 +38,8 @@ async def register(data: RegisterRequest):
     description="Authenticate with username and password. "
     "Returns JWT access + refresh token pair.",
 )
-async def login(data: LoginRequest):
+async def login(data: LoginRequest, service: AuthService = Depends()):
     """POST /api/v1/auth/login — Login and get tokens."""
-    service = AuthService()
     return await service.login(data)
 
 
@@ -51,7 +49,6 @@ async def login(data: LoginRequest):
     summary="Refresh tokens",
     description="Use a valid refresh token to get a new access + refresh token pair.",
 )
-async def refresh(data: RefreshTokenRequest):
+async def refresh(data: RefreshTokenRequest, service: AuthService = Depends()):
     """POST /api/v1/auth/refresh — Refresh token pair."""
-    service = AuthService()
     return await service.refresh_tokens(data.refresh_token)

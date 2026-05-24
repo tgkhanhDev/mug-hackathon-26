@@ -19,18 +19,22 @@ class Settings(BaseSettings):
         description="Database name",
     )
 
-    # ── OpenAI Embedding ───────────────────────────────────────
+    # ── Hugging Face / OpenAI Embedding ────────────────────────
+    HF_API_TOKEN: str = Field(
+        default="",
+        description="Hugging Face API Token (leave empty to try without token)",
+    )
     OPENAI_API_KEY: str = Field(
         default="",
-        description="OpenAI API key (leave empty to use mock embedding)",
+        description="OpenAI API key (leave empty to use Hugging Face or mock)",
     )
     EMBEDDING_MODEL: str = Field(
-        default="text-embedding-3-small",
-        description="OpenAI embedding model name",
+        default="sentence-transformers/all-MiniLM-L6-v2",
+        description="Embedding model name (e.g. sentence-transformers/all-MiniLM-L6-v2 or text-embedding-3-small)",
     )
     EMBEDDING_DIMENSIONS: int = Field(
-        default=1536,
-        description="Embedding vector dimensions",
+        default=384,
+        description="Embedding vector dimensions (e.g. 384 for all-MiniLM-L6-v2, 1536 for OpenAI)",
     )
 
     # ── JWT Auth ───────────────────────────────────────────────
@@ -60,12 +64,38 @@ class Settings(BaseSettings):
     # ── Server ─────────────────────────────────────────────────
     PORT: int = Field(default=8033, description="Server port")
 
+    # ── AWS S3 ─────────────────────────────────────────────────
+    AWS_ACCESS_KEY_ID: str = Field(
+        default="", 
+        description="AWS Access Key ID for S3 upload"
+    )
+    AWS_SECRET_ACCESS_KEY: str = Field(
+        default="", 
+        description="AWS Secret Access Key"
+    )
+    AWS_REGION: str = Field(
+        default="ap-southeast-1", 
+        description="AWS Region (e.g. ap-southeast-1)"
+    )
+    AWS_BUCKET_NAME: str = Field(
+        default="", 
+        description="AWS S3 Bucket Name"
+    )
+
+    # ── Pexels Crawler ─────────────────────────────────────────
+    PEXELS_API_KEY: str = Field(
+        default="",
+        description="Pexels API Key for crawler"
+    )
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
         "case_sensitive": True,
+        "extra": "ignore",
     }
 
 
 # Singleton instance
 settings = Settings()
+

@@ -12,16 +12,12 @@ from pydantic import BaseModel, Field
 
 
 # ── Enums ──────────────────────────────────────────────────────
-INTERACTION_TYPES = ["like", "skip", "comment", "replay", "share"]
+INTERACTION_TYPES = ["like", "skip", "comment", "replay", "share", "passive_view"]
 
 # Trọng số update interest_vector theo interaction type
-INTERACTION_WEIGHTS = {
-    "like": 1.0,
-    "replay": 0.8,
-    "comment": 0.6,
-    "share": 0.5,
-    "skip": -0.3,
-}
+# Canonical definition lives in app.utils.formula.interest_vector;
+# re-exported here for backward compatibility.
+from app.utils.formula.interest_vector import INTERACTION_WEIGHTS  # noqa: F401, E402
 
 
 # ── Request DTO ────────────────────────────────────────────────

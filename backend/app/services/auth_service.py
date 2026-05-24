@@ -57,13 +57,13 @@ class AuthService:
             raise DuplicateException("User", "username")
 
         # Hash password
-     #   hashed_pw = pwd_context.hash(data.password)
+        hashed_pw = pwd_context.hash(data.password)
 
         now = datetime.utcnow()
         doc = UserInDB(
             username=data.username,
             email=data.email,
-            # password_hash=hashed_pw,
+            password_hash=hashed_pw,
             interest_tags=data.interest_tags,
             interest_vector=[],  # Will be populated by scheduler or onboarding flow
             created_at=now,
@@ -90,8 +90,8 @@ class AuthService:
         if not user:
             raise UnauthorizedException("Invalid username or password")
 
-        # if not pwd_context.verify(data.password, user.get("password_hash", "")):
-        #     raise UnauthorizedException("Invalid username or password")
+        if not pwd_context.verify(data.password, user.get("password_hash", "")):
+            raise UnauthorizedException("Invalid username or password")
 
         return self._create_token_pair(user["id"], user["username"])
 
@@ -117,6 +117,8 @@ class AuthService:
             refresh_token=refresh_token,
             token_type="bearer",
             expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            user_id=user_id,
+            username=username,
         )
 
     @staticmethod
