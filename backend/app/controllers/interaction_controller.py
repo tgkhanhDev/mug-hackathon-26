@@ -151,46 +151,66 @@ async def get_vector_status(user_id: str):
 
 
 # ══════════════════════════════════════════════════════════════════
-# WebSocket — real-time video stats
+# WebSocket — real-time video stats (1 connection per session)
 # ══════════════════════════════════════════════════════════════════
 
-@router.websocket("/ws/stats/{video_id}")
-async def ws_video_stats(websocket: WebSocket, video_id: str):
+@router.websocket("/ws/stats/{session_id}")
+async def ws_session_stats(websocket: WebSocket, session_id: str):
     """
-    WS /ws/stats/{video_id} — Real-time like/view/comment counts.
+    WS /ws/stats/{session_id} — Single connection per user session.
 
     Flow:
-      1. Client connects → receives current stats snapshot immediately
-      2. Whenever any user likes/views/comments this video:
-         → all subscribed clients receive updated counts
-      3. Client disconnects when scrolling past the video
+      1. Client connects once when session starts
+      2. Client sends JSON messages to subscribe/unsubscribe from video stats:
+         {"action": "subscribe", "video_id": "abc123"}
+         {"action": "unsubscribe", "video_id": "abc123"}
+      3. When subscribing, client receives an immediate stats snapshot
+      4. Whenever any user interacts with a subscribed video,
+         this client receives updated counts
+      5. Connection closes when session ends or client disconnects
     """
-    await ws_manager.connect(video_id, websocket)
+    await ws_manager.connect(session_id, websocket)
 
     try:
-        # Send initial snapshot
         from app.repositories.video_repository import VideoRepository
         repo = VideoRepository()
-        video = await repo.find_by_id(video_id)
 
-        if video:
-            await websocket.send_json({
-                "event": "stats_snapshot",
-                "video_id": video_id,
-                "like_count": video.get("like_count", 0),
-                "view_count": video.get("view_count", 0),
-                "comment_count": video.get("comment_count", 0),
-            })
-
-        # Keep connection alive — wait for client disconnect
         while True:
-            # We don't expect messages FROM the client,
-            # but we must await to detect disconnection.
-            await websocket.receive_text()
+            # Wait for subscribe/unsubscribe messages from client
+            raw = await websocket.receive_text()
+
+            try:
+                import json
+                msg = json.loads(raw)
+                action = msg.get("action")
+                video_id = msg.get("video_id")
+
+                if not video_id:
+                    continue
+
+                if action == "subscribe":
+                    ws_manager.subscribe(session_id, video_id)
+                    # Send immediate stats snapshot for this video
+                    video = await repo.find_by_id(video_id)
+                    if video:
+                        await websocket.send_json({
+                            "event": "stats_snapshot",
+                            "video_id": video_id,
+                            "like_count": video.get("like_count", 0),
+                            "view_count": video.get("view_count", 0),
+                            "comment_count": video.get("comment_count", 0),
+                        })
+
+                elif action == "unsubscribe":
+                    ws_manager.unsubscribe(session_id, video_id)
+
+            except (json.JSONDecodeError, AttributeError):
+                logger.debug(f"WS received non-JSON message from session={session_id}")
 
     except WebSocketDisconnect:
-        ws_manager.disconnect(video_id, websocket)
-        logger.debug(f"WS client disconnected from video={video_id}")
+        ws_manager.disconnect(session_id)
+        logger.debug(f"WS client disconnected | session={session_id}")
     except Exception as exc:
-        ws_manager.disconnect(video_id, websocket)
-        logger.warning(f"WS error for video={video_id}: {exc}")
+        ws_manager.disconnect(session_id)
+        logger.warning(f"WS error for session={session_id}: {exc}")
+
