@@ -96,3 +96,17 @@ Bây giờ, bạn cuộn siêu nhanh, tạo ra 50 thẻ `<video>`.
 
 **Đó là lý do ta phải dùng Div (Virtualization):**
 Thẻ `<div>` thì chỉ là một cái hộp vuông chứa văn bản/màu nền. Nó mất khoảng 1KB RAM và CPU để vẽ. Khi trượt đi, ta giấu thẻ `<video>` thành `<div>`, hệ điều hành sẽ giải phóng cái "Video Decoder" và "GPU Memory" đó để nhường cho video đang chiếu.
+
+### 4. Xử lý State khi chuyển đổi qua lại giữa `<video>` và `<div>`
+Khi thay thế `<video>` bằng `<div>` (Virtualization), thẻ `<video>` thực chất bị hủy (unmount) khỏi DOM và mất hết bộ đệm. Để trải nghiệm mượt mà, ta xử lý như sau:
+
+*   **Từ `<div>` về lại `<video>` (Làm sao biết fetch segment nào?):**
+    Khi thẻ `<video>` bị hủy, nó sẽ quên mất mình đang phát tới đâu. Để giải quyết, ta làm như sau:
+    *   **Lưu tọa độ thời gian (State/Ref):** Trước khi thẻ `<video>` biến mất (bị unmount), ta dùng React lưu lại thời gian đang xem của user. Ví dụ: `const savedTime = useRef(videoElement.currentTime)` (giả sử đang xem ở giây thứ 15.5).
+    *   **Browser thông minh (HTTP Range Request):** Khi user cuộn lại, thẻ `<video>` mới được sinh ra. Ta gán ngay `video.currentTime = 15.5`. Lúc này, trình duyệt sẽ đọc cái "Mục lục" của file video (gọi là Metadata hay `moov atom`), nó tự tính toán: *"À, giây thứ 15.5 tương đương với byte thứ 5 triệu của file"*.
+    *   **Fetch đúng chỗ:** Trình duyệt lập tức gửi một request lên Backend có chứa Header `Range: bytes=5000000-`. Nhờ vậy, Backend chỉ trả về đúng cái Chunk (Segment) chứa giây thứ 15.5 trở đi, chứ không tải lại từ đầu.
+
+*   **Từ `<video>` sang `<div>` (Làm sao không bị đen màn hình?):**
+    Nếu ta rút ngang thẻ `<video>` và để lại `<div>` trống, màn hình sẽ bị giật chớp đen. Để "đánh lừa" thị giác người dùng, có 2 cách phổ biến:
+    *   **Cách 1 (Dễ nhất - Dùng Thumbnail):** Thẻ `<div>` đó thực chất chứa một thẻ `<img src={poster_url} />` bao phủ toàn bộ. Khi video biến mất, màn hình hiện bức ảnh bìa của video (giống hệt lúc bạn mới mở app TikTok mà mạng chậm, nó hiện cái ảnh tĩnh trước khi video chạy).
+    *   **Cách 2 (Siêu mượt - Chụp ảnh Snapshot):** Ngay trước cái mili-giây mà thẻ `<video>` bị hủy, Javascript sẽ "chụp" lại chính xác khung hình đang dừng của video đó (bằng cách dùng một thẻ `<canvas>` ẩn để vẽ lại frame). Sau đó xuất ra một tấm ảnh tĩnh (`canvas.toDataURL()`) và ốp tấm ảnh tĩnh đó làm `background-image` cho cái `<div>`.
