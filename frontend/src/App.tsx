@@ -112,6 +112,9 @@ function App() {
   // mutateFeed() call returns a fresh batch of BATCH_SIZE videos never seen before.
   const BATCH_SIZE = 5;
   const [feedLimit] = useState(BATCH_SIZE);
+  // feedFetchKey: incrementing this changes the SWR cache key, forcing a real
+  // network request even when limit stays constant (bypasses SWR cache).
+  const [feedFetchKey, setFeedFetchKey] = useState(0);
   const [trendingLimit, setTrendingLimit] = useState(BATCH_SIZE);
 
   // Track if the initial SWR fetch has happened, so we don't double-fetch
@@ -127,8 +130,13 @@ function App() {
   // It is reset inside Feed whenever the videos array grows (new batch arrived).
   const hasFetchedNextBatch = useRef(false);
 
+  // excludeIds: snapshot of video IDs already displayed, set in onLoadMore handler
+  // right before incrementing feedFetchKey. Both state updates are batched by React
+  // into a single render, so SWR sees the correct exclude list + new fetchKey together.
+  const [excludeIds, setExcludeIds] = useState<string[]>([]);
+
   // Fetch feed based on auth state
-  const { videos: apiVideos, mutate: mutateFeed } = usePersonalizedFeed(user ? user.id : null, feedLimit);
+  const { videos: apiVideos, mutate: mutateFeed } = usePersonalizedFeed(user ? user.id : null, feedLimit, feedFetchKey, excludeIds);
   const { videos: trendingVideos, mutate: mutateTrending } = useTrendingVideos(trendingLimit);
 
   // Select video source
@@ -225,6 +233,8 @@ function App() {
   // Reset accumulated videos and limits on user login/logout
   useEffect(() => {
     setAccumulatedVideos([]);
+    setExcludeIds([]); // clear exclude list for fresh user
+    setFeedFetchKey(0); // reset fetch key so new user starts from batch 0
     // feedLimit is constant (BATCH_SIZE), no need to reset it
     setTrendingLimit(BATCH_SIZE);
   }, [user?.id]);
@@ -311,8 +321,9 @@ function App() {
         setFatigueScore(0);
         setIsMindfulActive(false);
         setAccumulatedVideos([]);
-        // feedLimit is constant (BATCH_SIZE), no setter needed
-        mutateFeed();
+        setExcludeIds([]); // clear exclude list for fresh session
+        // Reset fetch key to 1 → new SWR cache key → forces fresh fetch for new session
+        setFeedFetchKey(1);
       } catch (error) {
         console.error('Error resetting session:', error);
       }
@@ -369,10 +380,10 @@ function App() {
 
           {/* Real-time Well-being Overlay Indicator (Premium Animated Bar) */}
           <div className={`absolute top-16 left-4 right-4 z-40 backdrop-blur-md rounded-2xl p-3 border shadow-lg transition-all duration-700 ${fatigueScore > 70
-              ? 'bg-rose-950/80 border-rose-500/40 shadow-rose-500/20'
-              : fatigueScore > 40
-                ? 'bg-amber-950/80 border-amber-500/30 shadow-amber-500/10'
-                : 'bg-zinc-900/80 border-zinc-800/80'
+            ? 'bg-rose-950/80 border-rose-500/40 shadow-rose-500/20'
+            : fatigueScore > 40
+              ? 'bg-amber-950/80 border-amber-500/30 shadow-amber-500/10'
+              : 'bg-zinc-900/80 border-zinc-800/80'
             }`}>
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
@@ -404,10 +415,10 @@ function App() {
             <div className="w-full h-2 bg-zinc-800 rounded-full overflow-hidden">
               <div
                 className={`h-full transition-all duration-700 ease-out rounded-full ${fatigueScore > 70
-                    ? 'bg-gradient-to-r from-rose-600 via-rose-400 to-red-500 shadow-[0_0_8px_rgba(244,63,94,0.6)]'
-                    : fatigueScore > 40
-                      ? 'bg-gradient-to-r from-amber-600 via-amber-400 to-yellow-400 shadow-[0_0_6px_rgba(245,158,11,0.4)]'
-                      : 'bg-gradient-to-r from-emerald-600 via-emerald-400 to-green-400 shadow-[0_0_4px_rgba(52,211,153,0.3)]'
+                  ? 'bg-gradient-to-r from-rose-600 via-rose-400 to-red-500 shadow-[0_0_8px_rgba(244,63,94,0.6)]'
+                  : fatigueScore > 40
+                    ? 'bg-gradient-to-r from-amber-600 via-amber-400 to-yellow-400 shadow-[0_0_6px_rgba(245,158,11,0.4)]'
+                    : 'bg-gradient-to-r from-emerald-600 via-emerald-400 to-green-400 shadow-[0_0_4px_rgba(52,211,153,0.3)]'
                   }`}
                 style={{ width: `${fatigueScore}%` }}
               />
@@ -453,16 +464,15 @@ function App() {
               onRefreshSessionStats={refreshSessionStats}
               swipeTrigger={swipeTrigger}
               onLoadMore={() => {
-                if (hasFetchedNextBatch.current) return; // already fetching this batch
+                if (hasFetchedNextBatch.current) return; // guard: already triggered for this batch
                 hasFetchedNextBatch.current = true;
                 if (user) {
-                  // feedLimit stays constant (BATCH_SIZE=5). mutateFeed() re-fetches
-                  // /feed?limit=5 and the backend's $nin dedup filter guarantees
-                  // a fresh batch of videos never seen in this session.
-                  mutateFeed();
+                  // Snapshot current accumulated IDs → backend will exclude these
+                  // React 18 batches both setState calls into one render.
+                  setExcludeIds(accumulatedVideos.map((v: any) => v.id));
+                  setFeedFetchKey(prev => prev + 1);
                 } else {
-                  // Trending has no session-based dedup on BE → still increase limit
-                  // so the endpoint returns more results for FE to filter duplicates.
+                  // Trending: increase limit so backend returns more results
                   setTrendingLimit(prev => prev + BATCH_SIZE);
                 }
               }}

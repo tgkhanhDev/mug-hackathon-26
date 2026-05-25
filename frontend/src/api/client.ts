@@ -60,10 +60,13 @@ export function useTrendingVideos(limit: number = 10) {
   };
 }
 
-export function usePersonalizedFeed(userId: string | null, limit: number = 10) {
+export function usePersonalizedFeed(userId: string | null, limit: number = 10, fetchKey: number = 0, excludeIds: string[] = []) {
+  // Build URL with exclude param so backend can dedup server-side
+  const excludeParam = excludeIds.length > 0 ? `&exclude=${excludeIds.join(',')}` : '';
   const { data, error, isLoading, mutate } = useSWR<VideoResponse[]>(
-    userId ? `${API_URL}/feed/${userId}?limit=${limit}` : null,
-    fetcher
+    userId ? `${API_URL}/feed/${userId}?limit=${limit}${excludeParam}&_k=${fetchKey}` : null,
+    fetcher,
+    { revalidateOnFocus: false, revalidateOnReconnect: false }
   );
   return {
     videos: data,
