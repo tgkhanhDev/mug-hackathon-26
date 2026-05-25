@@ -190,7 +190,10 @@ async def main():
         await interaction_service.record_behavior_log(log_data)
         
     print("Waiting briefly for background tasks to update session...")
-    await asyncio.sleep(1) # Let fire-and-forget background updates run
+    await asyncio.sleep(3) # Let fire-and-forget background updates run
+    
+    logs_count = await log_repo.count_documents({"session_id": session_id}) if hasattr(log_repo, 'count_documents') else len(await log_repo.find_many({"session_id": session_id}))
+    print(f"Debug: Found {logs_count} behavior logs in DB for session {session_id}")
     
     updated_session = await session_repo.find_by_id(session_id)
     fatigue_score = updated_session.get("fatigue_score", 0.0)
@@ -266,6 +269,10 @@ async def main():
         replay_count=1
     )
     await interaction_service.record_interaction(interaction_data)
+    
+    # End the session to trigger batch vector update
+    await interaction_service.end_session(session_id)
+    await asyncio.sleep(2)
     
     # Retrieve updated user interest vector
     updated_user = await user_repo.find_by_id(user_id)
