@@ -13,6 +13,7 @@ from app.repositories.video_repository import VideoRepository
 from app.repositories.behavior_log_repository import BehaviorLogRepository
 from app.repositories.feed_session_repository import FeedSessionRepository
 from app.repositories.interaction_repository import InteractionRepository
+from app.repositories.redis_client import get_seen_videos, is_redis_available, bulk_add_seen_videos
 from app.services.video_service import VideoService
 from app.utils.exceptions import NotFoundException
 
@@ -99,20 +100,37 @@ class FeedService:
         if exclude_ids:
             seen_set.update(exclude_ids)
 
-        # 2b. Also include session-based seen IDs from interactions + behavior_logs
+        # 2b. Read seen_set from Redis (always up-to-date, ~1ms)
+        #     Falls back to MongoDB queries if Redis is unavailable.
         if active_session:
             session_id = active_session["id"]
 
-            # From explicit interactions (like, skip, replay, …)
-            seen_video_ids = await self._interaction_repo.find_video_ids_in_session(session_id)
-            seen_set.update(seen_video_ids)
+            redis_seen = await get_seen_videos(session_id)
+            if redis_seen:
+                # Redis has authoritative seen data — use it directly
+                seen_set.update(redis_seen)
+                logger.info(
+                    f"🔴 Redis seen-set: {len(redis_seen)} videos for session {session_id}"
+                )
+            else:
+                # Fallback: Redis unavailable or empty → query MongoDB
+                # From explicit interactions (like, skip, replay, …)
+                seen_video_ids = await self._interaction_repo.find_video_ids_in_session(session_id)
+                seen_set.update(seen_video_ids)
 
-            # From passive behavior logs
-            behavior_docs = await self._log_repo.find_many(
-                filter={"session_id": session_id},
-                limit=500,
-            )
-            seen_set.update(d["video_id"] for d in behavior_docs)
+                # From passive behavior logs
+                behavior_docs = await self._log_repo.find_many(
+                    filter={"session_id": session_id},
+                    limit=500,
+                )
+                seen_set.update(d["video_id"] for d in behavior_docs)
+
+                # Seed Redis with MongoDB data for future requests
+                if seen_set and is_redis_available():
+                    await bulk_add_seen_videos(session_id, seen_set)
+                    logger.info(
+                        f"🔁 Seeded Redis with {len(seen_set)} seen videos from MongoDB"
+                    )
 
         # 2c. Build the $nin filter from the combined seen set
         if seen_set:
