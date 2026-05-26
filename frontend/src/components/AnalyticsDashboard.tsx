@@ -7,7 +7,6 @@ interface AnalyticsDashboardProps {
   sessionVideoCount: number;
   adaptiveState: 'normal' | 'warning' | 'exhausted';
   topicCounts: Record<string, number>;
-  eventLog: { time: string; message: string; type: string }[];
   onSimulateDoomscroll: () => void;
   onResetSession: () => void;
   onTriggerSwipe: (dir: 'up' | 'down', speed: 'slow' | 'fast') => void;
@@ -19,7 +18,6 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
   sessionVideoCount,
   adaptiveState,
   topicCounts,
-  eventLog,
   onSimulateDoomscroll,
   onResetSession,
   onTriggerSwipe

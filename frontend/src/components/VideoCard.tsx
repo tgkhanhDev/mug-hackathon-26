@@ -23,7 +23,7 @@ interface VideoCardProps {
   sessionId: string | null;
   onRefreshSessionStats: (activeSessionId?: string | null) => Promise<void>;
   swipeSpeed: number;
-  onBehaviorLogged?: (data: { topic: string; swipeSpeed: number; duration: number }) => void;
+  onVideoActivated?: (videoId: string) => void;
 }
 
 /** Cards within ±WINDOW_SIZE of the active index render a real <video>.
@@ -48,7 +48,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
   sessionId,
   onRefreshSessionStats,
   swipeSpeed,
-  onBehaviorLogged
+  onVideoActivated
 }) => {
   // Sliding-window virtualization: only render <video> for nearby cards
   const isInWindow = Math.abs(index - activeIndex) <= WINDOW_SIZE;
@@ -110,6 +110,8 @@ export const VideoCard: React.FC<VideoCardProps> = ({
 
   useEffect(() => {
     if (isActive && isInWindow) {
+      // Fire once per unique video activation so parent can count unique views
+      onVideoActivated?.(videoId);
       // Only attempt to play when the real <video> element is in the DOM
       setIsPlaying(true);
       activeStartTimeRef.current = Date.now();
@@ -153,11 +155,6 @@ export const VideoCard: React.FC<VideoCardProps> = ({
             wasInteracted
           ).then(() => {
             onRefreshSessionStats();
-            onBehaviorLogged?.({
-              topic: params.topic,
-              swipeSpeed: params.swipeSpeed,
-              duration
-            });
           });
 
           // Removed default interactions (skip/passive_view) as requested.

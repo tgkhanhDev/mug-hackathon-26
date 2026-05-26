@@ -48,33 +48,25 @@ function App() {
 
   // Analytics Dashboard states
   const [fatigueHistory, setFatigueHistory] = useState<number[]>([]);
-  const [eventLog, setEventLog] = useState<{ time: string; message: string; type: string }[]>([]);
   const [localVideoCount, setLocalVideoCount] = useState(0);
   const [topicCounts, setTopicCounts] = useState<Record<string, number>>({});
   const [adaptiveState, setAdaptiveState] = useState<'normal' | 'warning' | 'exhausted'>('normal');
   const prevFatigueRef = useRef(0);
+  // Ref for seen-set dedup: tracks unique videoIds seen this session
+  const seenVideoIdsRef = useRef<Set<string>>(new Set());
+  // Ref mirror of accumulatedVideos for stable read inside callbacks
+  const accumulatedVideosRef = useRef<any[]>([]);
 
-  const CALMING_TOPICS = ['nature', 'meditation', 'calming', 'sleep', 'piano', 'mindfulness'];
+  const handleVideoActivated = useCallback((videoId: string) => {
+    if (seenVideoIdsRef.current.has(videoId)) return; // Already counted
+    seenVideoIdsRef.current.add(videoId);
 
-  const handleBehaviorLogged = useCallback(({ topic, swipeSpeed, duration }: { topic: string; swipeSpeed: number; duration: number }) => {
-    // 1) Increment local video count
+    // Look up topic from the video list (read from ref, no closure issue)
+    const video = accumulatedVideosRef.current.find((v: any) => v.id === videoId);
+    const topic: string = (video?.tags && video.tags.length > 0) ? video.tags[0] : 'general';
+
     setLocalVideoCount(prev => prev + 1);
-
-    // 2) Update topic counts for Feed Composition
-    const safeTopic = topic || 'general';
-    setTopicCounts(prev => ({ ...prev, [safeTopic]: (prev[safeTopic] || 0) + 1 }));
-
-    // 3) Push event log immediately
-    const isDoom = swipeSpeed > 500;
-    const isCalm = CALMING_TOPICS.some(t => safeTopic.toLowerCase().includes(t));
-    const emoji = isDoom ? '⚡' : isCalm ? '🌿' : '📹';
-    const label = isDoom ? 'Lướt nhanh' : isCalm ? 'Mindful view' : 'Đã xem';
-    
-    setEventLog(prev => [...prev.slice(-29), {
-      time: new Date().toLocaleTimeString(),
-      message: `${emoji} ${label}: "${safeTopic}" (${Math.round(duration)}s)`,
-      type: isDoom ? 'warning' : isCalm ? 'success' : 'info'
-    }]);
+    setTopicCounts(prev => ({ ...prev, [topic]: (prev[topic] || 0) + 1 }));
   }, []);
 
   // Pagination / Infinite Scroll states
@@ -143,6 +135,11 @@ function App() {
     }
   }, [currentVideos]);
 
+  // Keep accumulatedVideosRef in sync for stable reads in handleVideoActivated
+  useEffect(() => {
+    accumulatedVideosRef.current = accumulatedVideos;
+  }, [accumulatedVideos]);
+
   // Map API videos to the format expected by Feed
   const feedVideos = accumulatedVideos && accumulatedVideos.length > 0 ? accumulatedVideos.map((v, index) => ({
     id: v.id,
@@ -185,31 +182,9 @@ function App() {
     }
   };
 
-  // Handle fatigue thresholds and event logs outside of functional updater
+  // Track fatigue thresholds for sparkline and future event log re-enablement
   useEffect(() => {
-    const prev = prevFatigueRef.current;
     const curr = fatigueScore;
-
-    if (prev < 40 && curr >= 40) {
-      setEventLog(log => [...log.slice(-19), {
-        time: new Date().toLocaleTimeString(),
-        message: '⚠️ Bước vào trạng thái Warning',
-        type: 'warning'
-      }]);
-    } else if (prev < 70 && curr >= 70) {
-      setEventLog(log => [...log.slice(-19), {
-        time: new Date().toLocaleTimeString(),
-        message: '🔥 Phase 3 kích hoạt — Feed đang được can thiệp',
-        type: 'danger'
-      }]);
-      if (isMindfulActive) {
-        setEventLog(log => [...log.slice(-19), {
-          time: new Date().toLocaleTimeString(),
-          message: '🌿 Palette Cleanser đã được inject vào feed',
-          type: 'success'
-        }]);
-      }
-    }
 
     setFatigueHistory(h => {
       if (h.length === 0 || h[h.length - 1] !== curr) {
@@ -219,7 +194,7 @@ function App() {
     });
 
     prevFatigueRef.current = curr;
-  }, [fatigueScore, isMindfulActive]);
+  }, [fatigueScore]);
 
   // Polling for Analytics Dashboard
   useEffect(() => {
@@ -340,9 +315,9 @@ function App() {
         setFatigueScore(0);
         setIsMindfulActive(false);
         setFatigueHistory([]);
-        setEventLog([{ time: new Date().toLocaleTimeString(), message: '🔄 Session mới bắt đầu', type: 'info' }]);
         setLocalVideoCount(0);
         setTopicCounts({});
+        seenVideoIdsRef.current = new Set();
         prevFatigueRef.current = 0;
         setAccumulatedVideos([]);
         setExcludeIds([]); // clear exclude list for fresh session
@@ -355,9 +330,9 @@ function App() {
       setFatigueScore(25);
       setIsMindfulActive(false);
       setFatigueHistory([]);
-      setEventLog([]);
       setLocalVideoCount(0);
       setTopicCounts({});
+      seenVideoIdsRef.current = new Set();
       prevFatigueRef.current = 0;
       setAccumulatedVideos([]);
       setTrendingLimit(BATCH_SIZE);
@@ -492,7 +467,7 @@ function App() {
               sessionId={sessionId}
               onRefreshSessionStats={refreshSessionStats}
               swipeTrigger={swipeTrigger}
-              onBehaviorLogged={handleBehaviorLogged}
+              onVideoActivated={handleVideoActivated}
               onLoadMore={() => {
                 if (hasFetchedNextBatch.current) return; // guard: already triggered for this batch
                 hasFetchedNextBatch.current = true;
@@ -536,7 +511,6 @@ function App() {
             sessionVideoCount={localVideoCount}
             adaptiveState={adaptiveState}
             topicCounts={topicCounts}
-            eventLog={eventLog}
             onSimulateDoomscroll={simulateDoomscroll}
             onResetSession={resetSession}
             onTriggerSwipe={triggerSwipe}
