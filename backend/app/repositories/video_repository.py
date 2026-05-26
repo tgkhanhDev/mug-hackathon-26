@@ -56,6 +56,40 @@ class VideoRepository(BaseRepository):
             "updated_at": datetime.utcnow(),
         })
 
+    async def find_random_calming(
+        self,
+        exclude_ids: set,
+        calming_categories: List[str] = None,
+        intensity_level: str = "low",
+        limit: int = 1,
+    ) -> Optional[Dict[str, Any]]:
+        """Find a random calming video for palette cleanser injection.
+
+        Uses MongoDB $sample for true random selection from calming categories,
+        excluding already-seen videos in the current session.
+        """
+        from bson import ObjectId
+
+        if calming_categories is None:
+            calming_categories = ["calming", "nature", "comedy", "music", "art"]
+
+        match_filter: Dict[str, Any] = {
+            "category": {"$in": calming_categories},
+            "intensity_level": intensity_level,
+        }
+
+        if exclude_ids:
+            valid_oids = [ObjectId(vid) for vid in exclude_ids if ObjectId.is_valid(vid)]
+            if valid_oids:
+                match_filter["_id"] = {"$nin": valid_oids}
+
+        pipeline = [
+            {"$match": match_filter},
+            {"$sample": {"size": limit}},
+        ]
+        results = await self.aggregate(pipeline)
+        return results[0] if results else None
+
     async def vector_search(
         self,
         query_vector: List[float],
@@ -64,21 +98,34 @@ class VideoRepository(BaseRepository):
         filter_stage: Optional[Dict[str, Any]] = None,
         search_weight: float = 100.0,
         trending_weight: float = 1.0,
+        adaptive_state: str = "normal",
+        num_exclude: int = 0,
     ) -> List[Dict[str, Any]]:
         """
         Perform $vectorSearch on the videos collection, calculating a combined
         total_score (search_score * search_weight + trending_score * trending_weight)
         and sorting by it.
+
+        When adaptive_state is "exhausted", an intensity_rank field is added so
+        that low-intensity videos always sort before higher-intensity ones.
         Requires a Vector Search Index named 'video_embedding_index' on Atlas.
+
+        NOTE: filter_stage is inserted AFTER $vectorSearch (at index 1) as a $match
+        post-filter — this is the correct Atlas Vector Search pattern.
         """
+        # Over-fetch from $vectorSearch to compensate for post-filter $nin exclusion.
+        # E.g.: need 5 videos, already excluded 5 → vectorSearch fetches 10 → 
+        # post-filter removes 5 seen → 5 fresh remain.
+        vs_limit = limit + num_exclude
+        vs_candidates = max(vs_limit * 10, 50)
         pipeline = [
             {
                 "$vectorSearch": {
                     "index": "video_embedding_index",
                     "path": "embedding",
                     "queryVector": query_vector,
-                    "numCandidates": num_candidates,
-                    "limit": limit,
+                    "numCandidates": vs_candidates,
+                    "limit": vs_limit,
                 }
             },
             {
@@ -97,16 +144,35 @@ class VideoRepository(BaseRepository):
                     }
                 }
             },
-            {
-                "$sort": {
-                    "total_score": -1
-                }
-            }
         ]
 
+        # Adaptive sorting: prioritize low-intensity when exhausted
+        # Use $switch to avoid wrong alphabetical ordering: "high" < "low" < "medium"
+        if adaptive_state == "exhausted":
+            pipeline.append({
+                "$addFields": {
+                    "intensity_rank": {
+                        "$switch": {
+                            "branches": [
+                                {"case": {"$eq": ["$intensity_level", "low"]}, "then": 0},
+                                {"case": {"$eq": ["$intensity_level", "medium"]}, "then": 1},
+                            ],
+                            "default": 2  # high
+                        }
+                    }
+                }
+            })
+            pipeline.append({"$sort": {"intensity_rank": 1, "total_score": -1}})
+        else:
+            pipeline.append({"$sort": {"total_score": -1}})
+
         # Optional post-filter (e.g., intensity_level filtering for fatigue)
+        # Inserted at index 1 so it runs AFTER $vectorSearch fetches candidates
         if filter_stage:
             pipeline.insert(1, {"$match": filter_stage})
+
+        # Final $limit: after post-filter exclusion, trim down to requested limit
+        pipeline.append({"$limit": limit})
 
         return await self.aggregate(pipeline)
 
@@ -117,7 +183,7 @@ class VideoRepository(BaseRepository):
         from bson import ObjectId
         if not ObjectId.is_valid(video_id):
             return False
-        
+
         inc_data = {}
         if views > 0:
             inc_data["view_count"] = views

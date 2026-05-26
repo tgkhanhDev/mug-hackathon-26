@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.repositories.database import connect_db, disconnect_db
+from app.repositories.redis_client import connect_redis, disconnect_redis, is_redis_available
 from app.utils.exceptions import AppException, app_exception_handler
 from app.utils.scheduler import start_scheduler, stop_scheduler
 from app.utils.embedding import is_mock_mode
@@ -48,11 +49,13 @@ async def lifespan(app: FastAPI):
     logger.info("=" * 60)
     logger.info("🌿 GoTouchGrass Backend starting up...")
     logger.info(f"   Database: {settings.DATABASE_NAME}")
+    logger.info(f"   Redis: {settings.REDIS_URL}")
     logger.info(f"   Embedding: {'🎲 MOCK MODE' if is_mock_mode() else '🤖 OpenAI'}")
     logger.info(f"   Port: {settings.PORT}")
     logger.info("=" * 60)
 
     await connect_db()
+    await connect_redis()
     start_scheduler()
 
     yield  # App is running
@@ -60,6 +63,7 @@ async def lifespan(app: FastAPI):
     # ── Shutdown ───────────────────────────────────────────
     logger.info("🛑 GoTouchGrass Backend shutting down...")
     stop_scheduler()
+    await disconnect_redis()
     await disconnect_db()
 
 

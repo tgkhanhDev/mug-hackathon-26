@@ -21,6 +21,7 @@ interface FeedProps {
   onRefreshSessionStats: (activeSessionId?: string | null) => Promise<void>;
   onLoadMore?: () => void;
   swipeTrigger?: { direction: 'up' | 'down'; speed: 'slow' | 'fast'; timestamp: number } | null;
+  onVideoActivated?: (videoId: string) => void;
 }
 
 export const Feed: React.FC<FeedProps> = ({
@@ -29,7 +30,8 @@ export const Feed: React.FC<FeedProps> = ({
   sessionId,
   onRefreshSessionStats,
   onLoadMore,
-  swipeTrigger
+  swipeTrigger,
+  onVideoActivated
 }) => {
   const [activeIndex, setActiveIndex] = useState(0);
   const [swipeSpeed, setSwipeSpeed] = useState(0);
@@ -37,6 +39,19 @@ export const Feed: React.FC<FeedProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const isProgrammaticScroll = useRef(false);
   const programmaticSpeed = useRef<number | null>(null);
+  // Track the videos.length at which we last triggered onLoadMore,
+  // so we don't spam it for every index that passes the threshold.
+  const lastLoadMoreAt = useRef<number>(-1);
+
+  // When new videos arrive (batch appended), reset the guard so the NEXT
+  // batch boundary can be triggered when user reaches the new end.
+  useEffect(() => {
+    // lastLoadMoreAt holds the old videos.length when we fired. If videos.length
+    // is now bigger, a fresh batch landed → allow firing again at the new threshold.
+    if (lastLoadMoreAt.current > 0 && videos.length > lastLoadMoreAt.current) {
+      lastLoadMoreAt.current = -1;
+    }
+  }, [videos.length]);
 
   useEffect(() => {
     if (!swipeTrigger || !containerRef.current) return;
@@ -111,8 +126,14 @@ export const Feed: React.FC<FeedProps> = ({
         scrollStartTime.current = Date.now();
         scrollStartTop.current = scrollPos;
       }
-      // Trigger fetch when approaching the end of the current batch (last 3 videos)
-      if (index > activeIndex && index >= videos.length - 3) {
+      // Trigger fetch when approaching the end of the current batch (last 2 videos).
+      // Guard: only fire once per batch size boundary to prevent spam.
+      if (
+        index > activeIndex &&
+        index >= videos.length - 2 &&
+        lastLoadMoreAt.current !== videos.length
+      ) {
+        lastLoadMoreAt.current = videos.length;
         if (onLoadMore) {
           onLoadMore();
         }
@@ -148,6 +169,7 @@ export const Feed: React.FC<FeedProps> = ({
           sessionId={sessionId}
           onRefreshSessionStats={onRefreshSessionStats}
           swipeSpeed={swipeSpeed}
+          onVideoActivated={onVideoActivated}
         />
       ))}
     </div>

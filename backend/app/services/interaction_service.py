@@ -32,6 +32,8 @@ from app.repositories.video_repository import VideoRepository
 from app.utils.exceptions import NotFoundException, ValidationException
 from bson import ObjectId
 
+from app.repositories.redis_client import add_seen_video
+
 from app.utils.formula import (
     calculate_ema_vector,
     calculate_batch_ema_vector,
@@ -293,6 +295,11 @@ class InteractionService:
         """
         now = datetime.utcnow()
         log_id = str(ObjectId())
+
+        # ✅ FIX RACE CONDITION: Write seen_id to Redis BEFORE returning 201
+        # This ensures GET /feed sees this video_id immediately (~1ms),
+        # even though the MongoDB insert happens asynchronously in the background.
+        await add_seen_video(data.session_id, data.video_id)
 
         # Fire and forget the actual insertion and metric updates
         asyncio.create_task(self._process_behavior_log_background(data, log_id, now))

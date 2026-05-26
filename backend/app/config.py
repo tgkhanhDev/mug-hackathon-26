@@ -19,6 +19,12 @@ class Settings(BaseSettings):
         description="Database name",
     )
 
+    # ── Redis (Seen-Set Cache) ─────────────────────────────────
+    REDIS_URL: str = Field(
+        default="redis://localhost:6379/0",
+        description="Redis connection URL for session seen-set cache",
+    )
+
     # ── Hugging Face / OpenAI Embedding ────────────────────────
     HF_API_TOKEN: str = Field(
         default="",
