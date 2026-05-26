@@ -26,7 +26,7 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
 }) => {
   // Feed composition stats based on actual viewed topics
   const CALMING_TOPICS = ['nature', 'meditation', 'calming', 'sleep', 'piano', 'mindfulness'];
-  const HIGH_TOPICS    = ['sports', 'football', 'gaming', 'dark_humor', 'programming', 'coding', 'lifestyle'];
+  const HIGH_TOPICS = ['sports', 'football', 'gaming', 'dark_humor', 'programming', 'coding', 'lifestyle'];
 
   const highCount = Object.entries(topicCounts)
     .filter(([t]) => HIGH_TOPICS.some(h => t.toLowerCase().includes(h)))
@@ -135,7 +135,7 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
       <div className="h-px bg-zinc-800/50" />
 
       {/* Section 4: Phase Transition Log */}
-      <div className="flex flex-col gap-2">
+      {/* <div className="flex flex-col gap-2">
         <span className="text-[10px] text-zinc-400 uppercase tracking-widest font-mono font-bold">Event Log</span>
         <div className="bg-zinc-950/60 rounded-xl p-3 border border-zinc-800/50 h-[120px] overflow-y-auto custom-scrollbar flex flex-col gap-2">
           {eventLog.length === 0 ? (
@@ -151,7 +151,7 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
             ))
           )}
         </div>
-      </div>
+      </div> */}
 
       <div className="h-px bg-zinc-800/50" />
 
