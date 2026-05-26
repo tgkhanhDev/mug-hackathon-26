@@ -21,6 +21,7 @@ interface FeedProps {
   onRefreshSessionStats: (activeSessionId?: string | null) => Promise<void>;
   onLoadMore?: () => void;
   swipeTrigger?: { direction: 'up' | 'down'; speed: 'slow' | 'fast'; timestamp: number } | null;
+  onBehaviorLogged?: (data: { topic: string; swipeSpeed: number; duration: number }) => void;
 }
 
 export const Feed: React.FC<FeedProps> = ({
@@ -29,7 +30,8 @@ export const Feed: React.FC<FeedProps> = ({
   sessionId,
   onRefreshSessionStats,
   onLoadMore,
-  swipeTrigger
+  swipeTrigger,
+  onBehaviorLogged
 }) => {
   const [activeIndex, setActiveIndex] = useState(0);
   const [swipeSpeed, setSwipeSpeed] = useState(0);
@@ -167,6 +169,7 @@ export const Feed: React.FC<FeedProps> = ({
           sessionId={sessionId}
           onRefreshSessionStats={onRefreshSessionStats}
           swipeSpeed={swipeSpeed}
+          onBehaviorLogged={onBehaviorLogged}
         />
       ))}
     </div>

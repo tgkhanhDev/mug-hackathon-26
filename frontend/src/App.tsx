@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { connectSessionWS, disconnectSessionWS } from './hooks/useVideoStats';
 import { Feed } from './components/Feed';
 import { BottomNav } from './components/BottomNav';
 import { AuthPopup } from './components/AuthPopup';
 import { AuthContext } from './context/AuthContext';
-import { Sparkles, Brain, Leaf, ShieldAlert, ChevronUp, ChevronDown, Zap, Gauge } from 'lucide-react';
+import { AnalyticsDashboard } from './components/AnalyticsDashboard';
+import { Sparkles, Brain, Leaf, ShieldAlert } from 'lucide-react';
 import {
   useTrendingVideos,
   usePersonalizedFeed,
@@ -15,69 +16,7 @@ import {
   sendInteraction
 } from './api/client';
 
-// Mock vertical-clipped video dataset
-const MOCK_VIDEOS = [
-  {
-    id: '1',
-    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
-    username: 'developer_meme',
-    description: 'Khi bạn cố gắng sửa 1 bug và tạo ra thêm 10 bug mới... 💻☠️ #coding #programmers #devlife #funny',
-    songName: 'Coding Lofi Beats - developer_life',
-    likes: 124300,
-    comments: 890,
-    shares: 4320,
-    bookmarks: 2310,
-    tags: ['programming']
-  },
-  {
-    id: '2',
-    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
-    username: 'cristiano_fans',
-    description: 'Khoảnh khắc không thể tin nổi của CR7 ở phút bù giờ cuối cùng! 🐐⚽ #football #cr7 #ronaldo #epic',
-    songName: 'Phonk Remix - SoundKing',
-    likes: 980200,
-    comments: 12430,
-    shares: 89400,
-    bookmarks: 54100,
-    tags: ['sports']
-  },
-  {
-    id: '3',
-    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4',
-    username: 'nature_heals',
-    description: 'Dừng lại 10 giây để ngắm nhìn vẻ đẹp yên bình này và hít thở thật sâu bạn nhé... 🍃⛰️ #mindfulness #gotouchgrass #calming',
-    songName: 'Âm thanh tự nhiên làm dịu tâm hồn',
-    likes: 54300,
-    comments: 1200,
-    shares: 8900,
-    bookmarks: 9820,
-    tags: ['nature']
-  },
-  {
-    id: '4',
-    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4',
-    username: 'dark_humor_hub',
-    description: 'Thứ Hai đầu tuần của tôi khi nghe sếp bảo dự án cần làm gấp trong tối nay. 💀🙃 #darkhumor #worklife #burnout',
-    songName: 'Sad Violin - Instrumental Player',
-    likes: 320100,
-    comments: 4210,
-    shares: 12900,
-    bookmarks: 7600,
-    tags: ['lifestyle']
-  },
-  {
-    id: '5',
-    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-    username: 'mindful_piano',
-    description: 'Hãy để bản nhạc piano nhẹ nhàng này gột rửa mọi áp lực ngày hôm nay của bạn. 🎹🌧️ #meditation #sleepmusic #piano',
-    songName: 'Raindrops & Melodies - Zen Garden',
-    likes: 87100,
-    comments: 2100,
-    shares: 15400,
-    bookmarks: 18200,
-    tags: ['meditation']
-  }
-];
+
 
 function App() {
   const [isAuthOpen, setIsAuthOpen] = useState(false);
@@ -106,6 +45,37 @@ function App() {
   // Fatigue and Adaptive Feed states
   const [fatigueScore, setFatigueScore] = useState(0);
   const [isMindfulActive, setIsMindfulActive] = useState(false);
+
+  // Analytics Dashboard states
+  const [fatigueHistory, setFatigueHistory] = useState<number[]>([]);
+  const [eventLog, setEventLog] = useState<{ time: string; message: string; type: string }[]>([]);
+  const [localVideoCount, setLocalVideoCount] = useState(0);
+  const [topicCounts, setTopicCounts] = useState<Record<string, number>>({});
+  const [adaptiveState, setAdaptiveState] = useState<'normal' | 'warning' | 'exhausted'>('normal');
+  const prevFatigueRef = useRef(0);
+
+  const CALMING_TOPICS = ['nature', 'meditation', 'calming', 'sleep', 'piano', 'mindfulness'];
+
+  const handleBehaviorLogged = useCallback(({ topic, swipeSpeed, duration }: { topic: string; swipeSpeed: number; duration: number }) => {
+    // 1) Increment local video count
+    setLocalVideoCount(prev => prev + 1);
+
+    // 2) Update topic counts for Feed Composition
+    const safeTopic = topic || 'general';
+    setTopicCounts(prev => ({ ...prev, [safeTopic]: (prev[safeTopic] || 0) + 1 }));
+
+    // 3) Push event log immediately
+    const isDoom = swipeSpeed > 500;
+    const isCalm = CALMING_TOPICS.some(t => safeTopic.toLowerCase().includes(t));
+    const emoji = isDoom ? '⚡' : isCalm ? '🌿' : '📹';
+    const label = isDoom ? 'Lướt nhanh' : isCalm ? 'Mindful view' : 'Đã xem';
+    
+    setEventLog(prev => [...prev.slice(-29), {
+      time: new Date().toLocaleTimeString(),
+      message: `${emoji} ${label}: "${safeTopic}" (${Math.round(duration)}s)`,
+      type: isDoom ? 'warning' : isCalm ? 'success' : 'info'
+    }]);
+  }, []);
 
   // Pagination / Infinite Scroll states
   // feedLimit is kept CONSTANT — backend dedup ($nin seen_video_ids) ensures each
@@ -185,7 +155,7 @@ function App() {
     shares: 0,
     bookmarks: 0,
     tags: v.tags
-  })) : MOCK_VIDEOS;
+  })) : [];
 
   const refreshSessionStats = async (activeSessionId?: string | null) => {
     const sid = activeSessionId !== undefined ? activeSessionId : sessionId;
@@ -193,8 +163,10 @@ function App() {
     try {
       const sessionData = await getSession(sid);
       const newScore = Math.round(sessionData.fatigue_score);
-      const isExhaustedOrWarning = sessionData.adaptive_state === 'warning' || sessionData.adaptive_state === 'exhausted';
+      const newAdaptiveState = sessionData.adaptive_state;
+      const isExhaustedOrWarning = newAdaptiveState === 'warning' || newAdaptiveState === 'exhausted';
 
+      setAdaptiveState(newAdaptiveState as 'normal' | 'warning' | 'exhausted');
       setFatigueScore(newScore);
 
       // Only trigger feed refetch when mindful state ACTUALLY changes,
@@ -212,6 +184,53 @@ function App() {
       console.error('Error fetching session stats:', error);
     }
   };
+
+  // Handle fatigue thresholds and event logs outside of functional updater
+  useEffect(() => {
+    const prev = prevFatigueRef.current;
+    const curr = fatigueScore;
+
+    if (prev < 40 && curr >= 40) {
+      setEventLog(log => [...log.slice(-19), {
+        time: new Date().toLocaleTimeString(),
+        message: '⚠️ Bước vào trạng thái Warning',
+        type: 'warning'
+      }]);
+    } else if (prev < 70 && curr >= 70) {
+      setEventLog(log => [...log.slice(-19), {
+        time: new Date().toLocaleTimeString(),
+        message: '🔥 Phase 3 kích hoạt — Feed đang được can thiệp',
+        type: 'danger'
+      }]);
+      if (isMindfulActive) {
+        setEventLog(log => [...log.slice(-19), {
+          time: new Date().toLocaleTimeString(),
+          message: '🌿 Palette Cleanser đã được inject vào feed',
+          type: 'success'
+        }]);
+      }
+    }
+
+    setFatigueHistory(h => {
+      if (h.length === 0 || h[h.length - 1] !== curr) {
+        return [...h.slice(-49), curr];
+      }
+      return h;
+    });
+
+    prevFatigueRef.current = curr;
+  }, [fatigueScore, isMindfulActive]);
+
+  // Polling for Analytics Dashboard
+  useEffect(() => {
+    let intervalId: any;
+    if (sessionId) {
+      intervalId = setInterval(() => {
+        refreshSessionStats(sessionId);
+      }, 3000);
+    }
+    return () => clearInterval(intervalId);
+  }, [sessionId, isMindfulActive]);
 
   // Recover or start session on mount / user change
   useEffect(() => {
@@ -320,6 +339,11 @@ function App() {
         connectSessionWS(newSession.id);
         setFatigueScore(0);
         setIsMindfulActive(false);
+        setFatigueHistory([]);
+        setEventLog([{ time: new Date().toLocaleTimeString(), message: '🔄 Session mới bắt đầu', type: 'info' }]);
+        setLocalVideoCount(0);
+        setTopicCounts({});
+        prevFatigueRef.current = 0;
         setAccumulatedVideos([]);
         setExcludeIds([]); // clear exclude list for fresh session
         // Reset fetch key to 1 → new SWR cache key → forces fresh fetch for new session
@@ -330,6 +354,11 @@ function App() {
     } else {
       setFatigueScore(25);
       setIsMindfulActive(false);
+      setFatigueHistory([]);
+      setEventLog([]);
+      setLocalVideoCount(0);
+      setTopicCounts({});
+      prevFatigueRef.current = 0;
       setAccumulatedVideos([]);
       setTrendingLimit(BATCH_SIZE);
       mutateTrending();
@@ -463,6 +492,7 @@ function App() {
               sessionId={sessionId}
               onRefreshSessionStats={refreshSessionStats}
               swipeTrigger={swipeTrigger}
+              onBehaviorLogged={handleBehaviorLogged}
               onLoadMore={() => {
                 if (hasFetchedNextBatch.current) return; // guard: already triggered for this batch
                 hasFetchedNextBatch.current = true;
@@ -498,72 +528,19 @@ function App() {
 
         </div>
 
-        {/* Control Panel (Outside phone frame) */}
-        <div className="hidden md:flex flex-col gap-5 bg-zinc-900/90 border border-zinc-800/80 rounded-[32px] p-5 w-64 text-white shadow-2xl backdrop-blur-md">
-          <div className="flex items-center gap-2 text-emerald-400">
-            <Gauge size={20} className="animate-pulse" />
-            <h3 className="font-bold text-xs uppercase tracking-wider font-mono">Bảng Điều Khiển Vuốt</h3>
-          </div>
-
-          <p className="text-zinc-500 text-[10px] leading-relaxed">
-            Mô phỏng hành động vuốt màn hình (Swipe Gesture) bên ngoài khung điện thoại để kiểm thử thuật toán mệt mỏi và đề xuất nội dung.
-          </p>
-
-          <div className="h-px bg-zinc-800/50" />
-
-          <div className="flex flex-col gap-3">
-            <span className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono font-bold">Lướt Tiếp (Tiến)</span>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={() => triggerSwipe('up', 'fast')}
-                className="py-2.5 px-3 bg-rose-500/10 hover:bg-rose-500 hover:text-black border border-rose-500/20 text-rose-400 font-semibold rounded-xl flex flex-col items-center justify-center gap-1 transition-all text-[10px]"
-              >
-                <Zap size={14} />
-                Nhanh (Doom)
-              </button>
-              <button
-                onClick={() => triggerSwipe('up', 'slow')}
-                className="py-2.5 px-3 bg-emerald-500/10 hover:bg-emerald-500 hover:text-black border border-emerald-500/20 text-emerald-400 font-semibold rounded-xl flex flex-col items-center justify-center gap-1 transition-all text-[10px]"
-              >
-                <ChevronDown size={14} />
-                Chậm (Mindful)
-              </button>
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-3">
-            <span className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono font-bold">Lướt Về (Lùi)</span>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={() => triggerSwipe('down', 'fast')}
-                className="py-2.5 px-3 bg-zinc-800 hover:bg-white hover:text-black border border-zinc-700 text-zinc-300 font-semibold rounded-xl flex flex-col items-center justify-center gap-1 transition-all text-[10px]"
-              >
-                <Zap size={14} />
-                Nhanh
-              </button>
-              <button
-                onClick={() => triggerSwipe('down', 'slow')}
-                className="py-2.5 px-3 bg-zinc-800 hover:bg-white hover:text-black border border-zinc-700 text-zinc-300 font-semibold rounded-xl flex flex-col items-center justify-center gap-1 transition-all text-[10px]"
-              >
-                <ChevronUp size={14} />
-                Chậm
-              </button>
-            </div>
-          </div>
-
-          <div className="h-px bg-zinc-800/50" />
-
-          <div className="bg-zinc-950/60 rounded-xl p-3 border border-zinc-800/50 flex flex-col gap-1.5">
-            <span className="text-[9px] text-zinc-500 font-mono">THÔNG SỐ GIẢ LẬP:</span>
-            <div className="flex justify-between text-[10px] text-zinc-400 font-mono">
-              <span>Tốc độ nhanh:</span>
-              <span className="text-rose-400">950 px/s</span>
-            </div>
-            <div className="flex justify-between text-[10px] text-zinc-400 font-mono">
-              <span>Tốc độ chậm:</span>
-              <span className="text-emerald-400">150 px/s</span>
-            </div>
-          </div>
+        {/* Analytics Dashboard (Outside phone frame, replacing old Control Panel) */}
+        <div className="hidden md:block">
+          <AnalyticsDashboard
+            fatigueScore={fatigueScore}
+            fatigueHistory={fatigueHistory}
+            sessionVideoCount={localVideoCount}
+            adaptiveState={adaptiveState}
+            topicCounts={topicCounts}
+            eventLog={eventLog}
+            onSimulateDoomscroll={simulateDoomscroll}
+            onResetSession={resetSession}
+            onTriggerSwipe={triggerSwipe}
+          />
         </div>
 
       </div>
