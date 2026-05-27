@@ -121,6 +121,9 @@ function App() {
   };
 
   const [accumulatedVideos, setAccumulatedVideos] = useState<any[]>([]);
+  
+  // Guard to prevent concurrent session creation (race condition safeguard)
+  const isCreatingSessionRef = useRef(false);
 
   useEffect(() => {
     if (currentVideos && currentVideos.length > 0) {
@@ -210,6 +213,13 @@ function App() {
   // Recover or start session on mount / user change
   useEffect(() => {
     if (user && !sessionId) {
+      // NEW: Prevent concurrent session creation (race condition safeguard)
+      if (isCreatingSessionRef.current) {
+        console.warn('⚠️ Session creation already in progress, skipping duplicate');
+        return;
+      }
+      isCreatingSessionRef.current = true;
+      
       startSession(user.id)
         .then((session) => {
           setSessionId(session.id);
@@ -217,7 +227,11 @@ function App() {
           connectSessionWS(session.id);
           refreshSessionStats(session.id);
         })
-        .catch(console.error);
+        .catch(console.error)
+        .finally(() => {
+          // NEW: Clear flag to allow future session creation if needed
+          isCreatingSessionRef.current = false;
+        });
     } else if (sessionId) {
       connectSessionWS(sessionId);
       refreshSessionStats(sessionId);
@@ -226,11 +240,24 @@ function App() {
 
   // Reset accumulated videos and limits on user login/logout
   useEffect(() => {
+    // Reset feed/video states
     setAccumulatedVideos([]);
     setExcludeIds([]); // clear exclude list for fresh user
     setFeedFetchKey(0); // reset fetch key so new user starts from batch 0
     // feedLimit is constant (BATCH_SIZE), no need to reset it
     setTrendingLimit(BATCH_SIZE);
+    
+    // NEW: Reset analytics states (fix for cache not clearing on login/register)
+    setFatigueScore(0);
+    setIsMindfulActive(false);
+    setFatigueHistory([]);
+    setLocalVideoCount(0);
+    setTopicCounts({});
+    setAdaptiveState('normal');
+    
+    // NEW: Reset refs for analytics tracking
+    seenVideoIdsRef.current = new Set();
+    prevFatigueRef.current = 0;
   }, [user?.id]);
 
   const handleLoginSuccess = async (userData: { id: string; username: string }, token: string) => {

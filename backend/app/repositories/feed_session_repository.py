@@ -5,7 +5,7 @@ Feed Session repository — data access for the `feed_sessions` collection.
 from app.repositories.base import BaseRepository
 from app.repositories.database import get_collection
 from bson import ObjectId
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 class FeedSessionRepository(BaseRepository):
     """Data access layer for the `feed_sessions` collection."""
@@ -16,6 +16,15 @@ class FeedSessionRepository(BaseRepository):
     async def find_active_session(self, user_id: str) -> Optional[Dict[str, Any]]:
         """Find the currently active session (ended_at is null)."""
         return await self.find_one({"user_id": user_id, "ended_at": None})
+
+    async def find_recent_sessions(self, user_id: str, seconds: int = 5) -> List[Dict[str, Any]]:
+        """Find sessions created in last N seconds for given user (race condition safeguard)."""
+        cutoff_time = datetime.utcnow() - timedelta(seconds=seconds)
+        col = get_collection("feed_sessions")
+        return await col.find({
+            "user_id": user_id,
+            "started_at": {"$gte": cutoff_time}
+        }).to_list(length=10)
 
     async def end_session(self, session_id: str) -> bool:
         """Mark a session as ended."""
