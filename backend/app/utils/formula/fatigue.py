@@ -47,7 +47,8 @@ DOPAMINE_PENALTY_MULTIPLIER = 10.0
 # ── Adaptive State Thresholds ──────────────────────────────────────
 
 FATIGUE_NORMAL_THRESHOLD = 40.0    # score < 40  → "normal"
-FATIGUE_WARNING_THRESHOLD = 70.0   # score ≤ 70  → "warning", else "exhausted"
+FATIGUE_WARNING_THRESHOLD = 70.0   # score ≤ 70  → "warning"
+FATIGUE_CRITICAL_THRESHOLD = 80.0  # score ≤ 80  → "exhausted", > 80 → "critical"
 
 
 # ── Pure Functions ─────────────────────────────────────────────────
@@ -125,11 +126,13 @@ def calculate_fatigue_score(
 def determine_adaptive_state(fatigue_score: float) -> str:
     """Map a fatigue score to the adaptive-state label.
 
-    Returns one of: ``"normal"``, ``"warning"``, ``"exhausted"``.
+    Returns one of: ``"normal"``, ``"warning"``, ``"exhausted"``, ``"critical"``.
     """
     if fatigue_score < FATIGUE_NORMAL_THRESHOLD:
         return "normal"
     elif fatigue_score <= FATIGUE_WARNING_THRESHOLD:
         return "warning"
-    else:
+    elif fatigue_score <= FATIGUE_CRITICAL_THRESHOLD:
         return "exhausted"
+    else:
+        return "critical"

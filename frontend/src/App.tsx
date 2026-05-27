@@ -5,6 +5,8 @@ import { BottomNav } from './components/BottomNav';
 import { AuthPopup } from './components/AuthPopup';
 import { AuthContext } from './context/AuthContext';
 import { AnalyticsDashboard } from './components/AnalyticsDashboard';
+import { TouchGrassModal } from './components/TouchGrassModal';
+import { FarewellScreen } from './components/FarewellScreen';
 import { Sparkles, Brain, Leaf, ShieldAlert } from 'lucide-react';
 import {
   useTrendingVideos,
@@ -50,12 +52,17 @@ function App() {
   const [fatigueHistory, setFatigueHistory] = useState<number[]>([]);
   const [localVideoCount, setLocalVideoCount] = useState(0);
   const [intensityCounts, setIntensityCounts] = useState<Record<string, number>>({});
-  const [adaptiveState, setAdaptiveState] = useState<'normal' | 'warning' | 'exhausted'>('normal');
+  const [adaptiveState, setAdaptiveState] = useState<'normal' | 'warning' | 'exhausted' | 'critical'>('normal');
   const prevFatigueRef = useRef(0);
   // Ref for seen-set dedup: tracks unique videoIds seen this session
   const seenVideoIdsRef = useRef<Set<string>>(new Set());
   // Ref mirror of accumulatedVideos for stable read inside callbacks
   const accumulatedVideosRef = useRef<any[]>([]);
+
+  // Touch grass states
+  const [showTouchGrassModal, setShowTouchGrassModal] = useState(false);
+  const [showFarewell, setShowFarewell] = useState(false);
+  const touchGrassPromptShownRef = useRef(false);
 
   const handleVideoActivated = useCallback((videoId: string) => {
     if (seenVideoIdsRef.current.has(videoId)) return; // Already counted
@@ -164,9 +171,11 @@ function App() {
       const sessionData = await getSession(sid);
       const newScore = Math.round(sessionData.fatigue_score);
       const newAdaptiveState = sessionData.adaptive_state;
-      const isExhaustedOrWarning = newAdaptiveState === 'warning' || newAdaptiveState === 'exhausted';
+      const isExhaustedOrWarning = newAdaptiveState === 'warning' || newAdaptiveState === 'exhausted' || newAdaptiveState === 'critical';
 
-      setAdaptiveState(newAdaptiveState as 'normal' | 'warning' | 'exhausted');
+
+
+      setAdaptiveState(newAdaptiveState as 'normal' | 'warning' | 'exhausted' | 'critical');
       setFatigueScore(newScore);
 
       // Only trigger feed refetch when mindful state ACTUALLY changes,
@@ -254,6 +263,7 @@ function App() {
     setLocalVideoCount(0);
     setIntensityCounts({});
     setAdaptiveState('normal');
+    setShowTouchGrassModal(false);
 
     // NEW: Reset refs for analytics tracking
     seenVideoIdsRef.current = new Set();
@@ -292,6 +302,7 @@ function App() {
 
     setFatigueScore(0);
     setIsMindfulActive(false);
+    setShowTouchGrassModal(false);
   };
 
   const simulateDoomscroll = async () => {
@@ -367,6 +378,16 @@ function App() {
     }
   };
 
+  const handleTouchGrass = async () => {
+    setShowTouchGrassModal(false);
+    await resetSession();
+    setShowFarewell(true);
+  };
+
+  const handleContinueWatching = () => {
+    setShowTouchGrassModal(false);
+  };
+
   return (
     <AuthContext.Provider value={{
       userId: user ? user.id : null,
@@ -410,11 +431,13 @@ function App() {
           </div>
 
           {/* Real-time Well-being Overlay Indicator (Premium Animated Bar) */}
-          <div className={`absolute top-16 left-4 right-4 z-40 backdrop-blur-md rounded-2xl p-3 border shadow-lg transition-all duration-700 ${fatigueScore > 70
-            ? 'bg-rose-950/80 border-rose-500/40 shadow-rose-500/20'
-            : fatigueScore > 40
-              ? 'bg-amber-950/80 border-amber-500/30 shadow-amber-500/10'
-              : 'bg-zinc-900/80 border-zinc-800/80'
+          <div className={`absolute top-16 left-4 right-4 z-40 backdrop-blur-md rounded-2xl p-3 border shadow-lg transition-all duration-700 ${fatigueScore >= 80
+            ? 'bg-rose-950/90 border-rose-500/70 shadow-rose-500/50 animate-pulse ring-1 ring-rose-500/30'
+            : fatigueScore > 70
+              ? 'bg-rose-950/80 border-rose-500/40 shadow-rose-500/20'
+              : fatigueScore > 40
+                ? 'bg-amber-950/80 border-amber-500/30 shadow-amber-500/10'
+                : 'bg-zinc-900/80 border-zinc-800/80'
             }`}>
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
@@ -424,7 +447,11 @@ function App() {
                   <span className="text-[10px] text-zinc-400 font-medium">Chỉ số Mệt mỏi (Fatigue)</span>
                   <span className="text-xs font-bold text-white flex items-center gap-1.5">
                     {fatigueScore}%
-                    {fatigueScore > 70 ? (
+                    {fatigueScore >= 80 ? (
+                      <span className="text-[9px] bg-rose-600/30 text-rose-300 px-1.5 py-0.5 rounded-full font-semibold border border-rose-500/50 animate-pulse shadow-[0_0_8px_rgba(225,29,72,0.4)]">
+                        💀 Nguy hiểm — Hãy nghỉ ngơi ngay!
+                      </span>
+                    ) : fatigueScore > 70 ? (
                       <span className="text-[9px] bg-rose-500/20 text-rose-300 px-1.5 py-0.5 rounded-full font-semibold border border-rose-500/30 animate-pulse">
                         🔥 Kiệt sức — Đang can thiệp
                       </span>
@@ -527,6 +554,15 @@ function App() {
             onRegisterSuccess={handleRegisterSuccess}
             onLogout={handleLogout}
           />
+
+          {/* Touch Grass Overlay Components */}
+          <TouchGrassModal
+            isOpen={showTouchGrassModal}
+            fatigueScore={fatigueScore}
+            onTouchGrass={handleTouchGrass}
+            onContinue={handleContinueWatching}
+          />
+          {showFarewell && <FarewellScreen onDismiss={() => setShowFarewell(false)} />}
 
         </div>
 

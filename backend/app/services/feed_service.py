@@ -43,9 +43,9 @@ class FeedService:
 
         - normal:    Maximize personalization (high search, low trending)
         - warning:   Balance personal + calming content
-        - exhausted: Prioritize trending/calming over vector similarity
+        - exhausted/critical: Prioritize trending/calming over vector similarity
         """
-        if adaptive_state == "exhausted":
+        if adaptive_state in ["exhausted", "critical"]:
             return (5.0, 0.5)
         elif adaptive_state == "warning":
             return (7.0, 0.1)
@@ -85,7 +85,7 @@ class FeedService:
         adaptive_state = "normal"
         if active_session:
             adaptive_state = active_session.get("adaptive_state", "normal")
-            if adaptive_state == "exhausted":
+            if adaptive_state in ["exhausted", "critical"]:
                 intensity_filter = {"intensity_level": "low"}
             elif adaptive_state == "warning":
                 intensity_filter = {"intensity_level": {"$in": ["low", "medium"]}}
@@ -223,8 +223,8 @@ class FeedService:
                     f"({exploration_video.get('id')}) to break filter bubble."
                 )
 
-        # 6. Palette Cleanser Injection (exhausted state only)
-        if adaptive_state == "exhausted" and limit >= 3 and len(docs) >= 2:
+        # 6. Palette Cleanser Injection (exhausted/critical state only)
+        if adaptive_state in ["exhausted", "critical"] and limit >= 3 and len(docs) >= 2:
             cleanser = await self._video_repo.find_random_calming(
                 exclude_ids=seen_set | {doc["id"] for doc in docs},
                 calming_categories=["calming", "nature"],
