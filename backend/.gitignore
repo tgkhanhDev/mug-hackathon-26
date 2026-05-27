@@ -150,3 +150,8 @@ cython_debug/
 .DS_Store
 Thumbs.db
 videos/
+
+# MinIO and Local Upload Temporary Files
+minio_data/
+temp_*
+*.tmp

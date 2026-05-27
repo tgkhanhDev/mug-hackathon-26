@@ -37,6 +37,9 @@ class VideoCreate(BaseModel):
     view_count: int = Field(default=0, ge=0, description="Tổng lượt xem")
     like_count: int = Field(default=0, ge=0, description="Tổng lượt like")
     comment_count: int = Field(default=0, ge=0, description="Tổng comment")
+    duration: Optional[float] = Field(default=None, description="Thời lượng video (giây)")
+    width: Optional[int] = Field(default=None, description="Chiều rộng video (pixel)")
+    height: Optional[int] = Field(default=None, description="Chiều cao video (pixel)")
 
     model_config = {
         "json_schema_extra": {
@@ -76,6 +79,9 @@ class VideoInDB(BaseModel):
     comment_count: int = 0
     trending_score: float = Field(default=0.0, description="view*1 + like*3 + comment*5")
     creator_id: str
+    duration: Optional[float] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -97,6 +103,9 @@ class VideoResponse(BaseModel):
     comment_count: int = 0
     trending_score: float = 0.0
     creator_id: str
+    duration: Optional[float] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
     has_embedding: bool = Field(default=False, description="True nếu đã có embedding vector")
     created_at: datetime
     updated_at: datetime
