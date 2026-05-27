@@ -164,7 +164,7 @@ class FeedService:
             num_exclude=len(seen_set),
         )
 
-        # Fallback 1: intensity filter too strict → drop it, keep dedup only
+        # Fallback 1: intensity filter too strict → drlúcop it, keep dedup only
         if len(docs) < limit and intensity_filter is not None:
             logger.info(
                 f"⚠️ Feed too small ({len(docs)}/{limit}) with intensity filter "

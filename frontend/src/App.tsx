@@ -49,7 +49,7 @@ function App() {
   // Analytics Dashboard states
   const [fatigueHistory, setFatigueHistory] = useState<number[]>([]);
   const [localVideoCount, setLocalVideoCount] = useState(0);
-  const [topicCounts, setTopicCounts] = useState<Record<string, number>>({});
+  const [intensityCounts, setIntensityCounts] = useState<Record<string, number>>({});
   const [adaptiveState, setAdaptiveState] = useState<'normal' | 'warning' | 'exhausted'>('normal');
   const prevFatigueRef = useRef(0);
   // Ref for seen-set dedup: tracks unique videoIds seen this session
@@ -61,12 +61,12 @@ function App() {
     if (seenVideoIdsRef.current.has(videoId)) return; // Already counted
     seenVideoIdsRef.current.add(videoId);
 
-    // Look up topic from the video list (read from ref, no closure issue)
+    // Look up intensity_level from the video list (read from ref, no closure issue)
     const video = accumulatedVideosRef.current.find((v: any) => v.id === videoId);
-    const topic: string = (video?.tags && video.tags.length > 0) ? video.tags[0] : 'general';
+    const intensity: string = video?.intensity_level || 'medium';
 
     setLocalVideoCount(prev => prev + 1);
-    setTopicCounts(prev => ({ ...prev, [topic]: (prev[topic] || 0) + 1 }));
+    setIntensityCounts(prev => ({ ...prev, [intensity]: (prev[intensity] || 0) + 1 }));
   }, []);
 
   // Pagination / Infinite Scroll states
@@ -121,7 +121,7 @@ function App() {
   };
 
   const [accumulatedVideos, setAccumulatedVideos] = useState<any[]>([]);
-  
+
   // Guard to prevent concurrent session creation (race condition safeguard)
   const isCreatingSessionRef = useRef(false);
 
@@ -219,7 +219,7 @@ function App() {
         return;
       }
       isCreatingSessionRef.current = true;
-      
+
       startSession(user.id)
         .then((session) => {
           setSessionId(session.id);
@@ -246,15 +246,15 @@ function App() {
     setFeedFetchKey(0); // reset fetch key so new user starts from batch 0
     // feedLimit is constant (BATCH_SIZE), no need to reset it
     setTrendingLimit(BATCH_SIZE);
-    
+
     // NEW: Reset analytics states (fix for cache not clearing on login/register)
     setFatigueScore(0);
     setIsMindfulActive(false);
     setFatigueHistory([]);
     setLocalVideoCount(0);
-    setTopicCounts({});
+    setIntensityCounts({});
     setAdaptiveState('normal');
-    
+
     // NEW: Reset refs for analytics tracking
     seenVideoIdsRef.current = new Set();
     prevFatigueRef.current = 0;
@@ -343,7 +343,7 @@ function App() {
         setIsMindfulActive(false);
         setFatigueHistory([]);
         setLocalVideoCount(0);
-        setTopicCounts({});
+        setIntensityCounts({});
         seenVideoIdsRef.current = new Set();
         prevFatigueRef.current = 0;
         setAccumulatedVideos([]);
@@ -358,7 +358,7 @@ function App() {
       setIsMindfulActive(false);
       setFatigueHistory([]);
       setLocalVideoCount(0);
-      setTopicCounts({});
+      setIntensityCounts({});
       seenVideoIdsRef.current = new Set();
       prevFatigueRef.current = 0;
       setAccumulatedVideos([]);
@@ -537,7 +537,7 @@ function App() {
             fatigueHistory={fatigueHistory}
             sessionVideoCount={localVideoCount}
             adaptiveState={adaptiveState}
-            topicCounts={topicCounts}
+            intensityCounts={intensityCounts}
             onSimulateDoomscroll={simulateDoomscroll}
             onResetSession={resetSession}
             onTriggerSwipe={triggerSwipe}
