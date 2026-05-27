@@ -97,6 +97,33 @@ def generate_tags(query: str, title: str) -> List[str]:
     return list(tags)[:10]
 
 
+async def is_url_valid(url: str, client: httpx.AsyncClient) -> bool:
+    """
+    Checks if a URL (local or remote) is valid and accessible.
+    """
+    if not url:
+        return False
+    if url.startswith("http://") or url.startswith("https://"):
+        try:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+            # Perform a fast HEAD request first
+            res = await client.head(url, headers=headers, follow_redirects=True, timeout=5.0)
+            if res.status_code == 200:
+                return True
+            # Fallback to GET (checking headers only via stream)
+            async with client.stream("GET", url, headers=headers, follow_redirects=True, timeout=5.0) as response:
+                return response.status_code == 200
+        except Exception as e:
+            logger.debug(f"URL check failed for {url}: {e}")
+            return False
+    else:
+        # Local file check. Remove leading slash
+        path = url.lstrip("/")
+        return os.path.exists(path) and os.path.getsize(path) > 0
+
+
 async def crawl_pexels(
     tasks: List[Dict[str, str]],
     limit: int,
@@ -166,11 +193,11 @@ async def crawl_pexels(
 
                     # Extract title
                     title = extract_title_from_url(video_url_page, query, photographer)
-                    title = title[:500]
+                    title = title[:2000] # will be saved as description (Pydantic max_length=2000)
 
                     # Construct description
                     description = f"High-quality {query} video shot by {photographer} on Pexels."
-                    description = description[:2000]
+                    description = description[:500] # will be saved as title (Pydantic max_length=500)
 
                     # Find best quality MP4 file
                     video_files = video.get("video_files", [])
@@ -185,7 +212,11 @@ async def crawl_pexels(
                     ]
                     
                     if not mp4_files:
-                        logger.warning(f"⚠️ No MP4 files found for video ID {video_id}. Skipping.")
+                        logger.warning(f"⚠️ No MP4 files found for video ID {video_id}. Trying all available video files.")
+                        mp4_files = video_files
+                        
+                    if not mp4_files:
+                        logger.warning(f"⚠️ No video files found for video ID {video_id} after fallback. Skipping.")
                         continue
 
                     # Sort by resolution/width to get the best quality
@@ -195,33 +226,38 @@ async def crawl_pexels(
                         logger.warning(f"⚠️ No download link for video ID {video_id}. Skipping.")
                         continue
 
-                    # Use a unique file path based on the Pexels video ID to prevent overwriting
-                    file_path = f"videos/video_{video_id}.mp4"
+                    # Determine which URL to save in the database
+                    db_url = download_link
 
-                    # Download video file
-                    logger.info(f"📥 Downloading video file: {download_link}")
+                    # Check if this video already exists in the database by title or URL
                     try:
-                        video_res = await client.get(download_link, follow_redirects=True, timeout=60.0)
-                        video_res.raise_for_status()
-                        
-                        with open(file_path, "wb") as f:
-                            f.write(video_res.content)
-                        logger.info(f"💾 Saved video locally to: {file_path}")
+                        existing_video = await video_service._repo.find_one({
+                            "$or": [
+                                {"title": title},
+                                {"url": db_url},
+                                {"url": download_link}
+                            ]
+                        })
+                        if existing_video:
+                            existing_url = existing_video.get("url")
+                            # Verify if the existing video's URL/file is still valid
+                            if await is_url_valid(existing_url, client):
+                                logger.info(f"⏭️ Skipping duplicate video: '{title}' (already exists and URL is valid)")
+                                continue
+                            else:
+                                logger.info(f"♻️ Existing video '{title}' has a broken URL ('{existing_url}'). Deleting old DB record to re-crawl...")
+                                await video_service._repo.delete_one(existing_video["id"])
                     except Exception as e:
-                        logger.error(f"❌ Failed to download or save video {video_id}: {e}")
-                        continue
+                        logger.warning(f"⚠️ Failed to query DB for duplicates: {e}")
 
                     # Prepare metadata tags and validation limits
                     tags = generate_tags(query, title)
                     thumbnail_url = video.get("image", "")
 
-                    # Determine which URL to save in the database
-                    db_url = download_link if db_url_mode == "online" else file_path
-
-                    # Instantiate the Pydantic create schema
+                    # Instantiate the Pydantic create schema with swapped title and description
                     video_dto = VideoCreate(
-                        title=title,
-                        description=description,
+                        title=description,  # swapped: title field gets the constructed description
+                        description=title,  # swapped: description field gets the parsed title slug
                         url=db_url,
                         thumbnail_url=thumbnail_url,
                         tags=tags,
@@ -240,10 +276,6 @@ async def crawl_pexels(
                         logger.info(f"✅ Success! Saved to DB with ID: {saved_video.id}")
                     except Exception as e:
                         logger.error(f"❌ Failed to save video metadata to DB: {e}")
-                        # Clean up downloaded file on database save failure
-                        if os.path.exists(file_path):
-                            os.remove(file_path)
-                            logger.info("🗑️ Cleaned up downloaded video file due to DB failure.")
         finally:
             logger.info("🔌 Disconnecting MongoDB...")
             await disconnect_db()
