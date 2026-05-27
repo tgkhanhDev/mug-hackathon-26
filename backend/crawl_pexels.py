@@ -254,6 +254,16 @@ async def crawl_pexels(
                     tags = generate_tags(query, title)
                     thumbnail_url = video.get("image", "")
 
+                    duration = video.get("duration")
+                    if duration is not None:
+                        try:
+                            duration = float(duration)
+                        except (ValueError, TypeError):
+                            duration = None
+
+                    width = best_video.get("width")
+                    height = best_video.get("height")
+
                     # Instantiate the Pydantic create schema with swapped title and description
                     video_dto = VideoCreate(
                         title=description,  # swapped: title field gets the constructed description
@@ -267,6 +277,9 @@ async def crawl_pexels(
                         view_count=0,
                         like_count=0,
                         comment_count=0,
+                        duration=duration,
+                        width=width,
+                        height=height,
                     )
 
                     # Save video using the Service Layer (generates embeddings and trending scores)
