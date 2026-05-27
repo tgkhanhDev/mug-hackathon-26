@@ -44,11 +44,12 @@ class FeedSessionRepository(BaseRepository):
         if not ObjectId.is_valid(session_id):
             return
         col = get_collection("feed_sessions")
-        field = (
-            "high_intensity_count"
-            if intensity_level == "high"
-            else "low_intensity_count"
-        )
+        if intensity_level == "high":
+            field = "high_intensity_count"
+        elif intensity_level == "medium":
+            field = "medium_intensity_count"
+        else:
+            field = "low_intensity_count"
         await col.update_one(
             {"_id": ObjectId(session_id)},
             {"$inc": {field: 1}},

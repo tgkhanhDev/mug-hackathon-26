@@ -108,7 +108,6 @@ class InteractionService:
         interaction_id, *_ = await asyncio.gather(
             self._repo.insert_one(doc.model_dump()),
             self._repo.increment_video_counters(data.video_id, data.type),
-            self._session_repo.increment_videos_watched(data.session_id),
         )
 
         logger.info(
