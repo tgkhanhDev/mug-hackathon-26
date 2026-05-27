@@ -5,13 +5,15 @@ import { Leaf, ArrowRight } from 'lucide-react';
 interface TouchGrassModalProps {
   isOpen: boolean;
   fatigueScore: number;
+  stage: 1 | 2;
   onTouchGrass: () => void;
-  onContinue: () => void;
+  onContinue?: () => void;
 }
 
 export const TouchGrassModal: React.FC<TouchGrassModalProps> = ({
   isOpen,
   fatigueScore,
+  stage,
   onTouchGrass,
   onContinue
 }) => {
@@ -27,7 +29,11 @@ export const TouchGrassModal: React.FC<TouchGrassModalProps> = ({
           <img src={grassImg} alt="Touch Grass" className="w-32 h-32 object-contain drop-shadow-2xl" />
         </div>
 
-        <h2 className="text-xl font-bold text-white mb-2 leading-tight">Này... Bạn đang <br/> kiệt sức rồi đó! 🌿</h2>
+        {stage === 1 ? (
+          <h2 className="text-xl font-bold text-white mb-2 leading-tight">Này... Bạn đang <br/> kiệt sức rồi đó! 🌿</h2>
+        ) : (
+          <h2 className="text-xl font-bold text-rose-400 mb-2 leading-tight">Bạn đã xem thêm 3 video rồi... 😤</h2>
+        )}
         
         <div className="flex flex-col items-center gap-1 mb-6 mt-2">
           <span className="text-zinc-400 text-[10px] uppercase font-bold tracking-wider">Chỉ số mệt mỏi</span>
@@ -39,9 +45,15 @@ export const TouchGrassModal: React.FC<TouchGrassModalProps> = ({
           </div>
         </div>
 
-        <p className="text-xs text-zinc-400 mb-8 px-2">
-          Hệ thống phát hiện bạn đã lướt liên tục quá lâu. Đã đến lúc đặt điện thoại xuống và bước ra ngoài.
-        </p>
+        {stage === 1 ? (
+          <p className="text-xs text-zinc-400 mb-8 px-2">
+            Hệ thống phát hiện bạn đã lướt liên tục quá lâu. Đã đến lúc đặt điện thoại xuống và bước ra ngoài.
+          </p>
+        ) : (
+          <p className="text-xs text-zinc-400 mb-8 px-2 font-semibold">
+            Đã đến lúc thật sự nghỉ ngơi rồi nhé!
+          </p>
+        )}
 
         <div className="flex flex-col w-full gap-3">
           <button
@@ -49,15 +61,17 @@ export const TouchGrassModal: React.FC<TouchGrassModalProps> = ({
             className="w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-[0_0_20px_rgba(16,185,129,0.3)]"
           >
             <Leaf size={18} />
-            Chạm Cỏ Ngay!
+            {stage === 1 ? 'Chạm Cỏ Ngay!' : 'OK, mình đi chạm cỏ đây! 🌱'}
           </button>
           
-          <button
-            onClick={onContinue}
-            className="w-full py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-semibold rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95"
-          >
-            Tiếp tục xem <ArrowRight size={16} />
-          </button>
+          {stage === 1 && onContinue && (
+            <button
+              onClick={onContinue}
+              className="w-full py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-semibold rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95"
+            >
+              Tiếp tục xem <ArrowRight size={16} />
+            </button>
+          )}
         </div>
       </div>
     </div>

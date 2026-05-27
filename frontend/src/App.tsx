@@ -59,10 +59,16 @@ function App() {
   // Ref mirror of accumulatedVideos for stable read inside callbacks
   const accumulatedVideosRef = useRef<any[]>([]);
 
-  // Touch grass states
+  // Touch Grass 2-stage flow
   const [showTouchGrassModal, setShowTouchGrassModal] = useState(false);
+  const [touchGrassStage, setTouchGrassStage] = useState<1 | 2>(1);
   const [showFarewell, setShowFarewell] = useState(false);
-  const touchGrassPromptShownRef = useRef(false);
+
+  // Refs (tồn tại trong 1 session, reset khi end session/logout)
+  const touchGrassWarnedRef = useRef(false);     // đã hiện stage 1 và user chọn "tiếp tục"
+  const videoCountAtWarningRef = useRef(0);       // số video đã xem lúc stage 1 bị dismiss
+  const stage1ShownRef = useRef(false);           // guard: không show stage 1 lặp lại
+  const localVideoCountRef = useRef(0);           // mirror của localVideoCount state
 
   const handleVideoActivated = useCallback((videoId: string) => {
     if (seenVideoIdsRef.current.has(videoId)) return; // Already counted
@@ -72,8 +78,21 @@ function App() {
     const video = accumulatedVideosRef.current.find((v: any) => v.id === videoId);
     const intensity: string = video?.intensity_level || 'medium';
 
-    setLocalVideoCount(prev => prev + 1);
+    setLocalVideoCount(prev => {
+      localVideoCountRef.current = prev + 1;
+      return prev + 1;
+    });
     setIntensityCounts(prev => ({ ...prev, [intensity]: (prev[intensity] || 0) + 1 }));
+
+    // Check stage 2 trigger ngay khi video mới được activate
+    if (
+      touchGrassWarnedRef.current &&
+      localVideoCountRef.current - videoCountAtWarningRef.current >= 3
+    ) {
+      touchGrassWarnedRef.current = false;
+      setTouchGrassStage(2);
+      setShowTouchGrassModal(true);
+    }
   }, []);
 
   // Pagination / Infinite Scroll states
@@ -178,6 +197,23 @@ function App() {
       setAdaptiveState(newAdaptiveState as 'normal' | 'warning' | 'exhausted' | 'critical');
       setFatigueScore(newScore);
 
+      // --- Stage 1: Cảnh báo lần đầu khi fatigue >= 30% ---
+      if (newScore >= 30 && !stage1ShownRef.current && !touchGrassWarnedRef.current) {
+        stage1ShownRef.current = true;
+        setTouchGrassStage(1);
+        setShowTouchGrassModal(true);
+      }
+
+      // --- Stage 2: Force quit nếu user đã bỏ qua cảnh báo + xem thêm 3 video ---
+      if (
+        touchGrassWarnedRef.current &&
+        localVideoCountRef.current - videoCountAtWarningRef.current >= 3
+      ) {
+        touchGrassWarnedRef.current = false;  // prevent re-trigger
+        setTouchGrassStage(2);
+        setShowTouchGrassModal(true);
+      }
+
       // Only trigger feed refetch when mindful state ACTUALLY changes,
       // AND not on the very first load (SWR already fetched automatically)
       if (isExhaustedOrWarning !== isMindfulActive && hasInitialFeedFetched.current) {
@@ -207,17 +243,6 @@ function App() {
 
     prevFatigueRef.current = curr;
   }, [fatigueScore]);
-
-  // Polling for Analytics Dashboard
-  useEffect(() => {
-    let intervalId: any;
-    if (sessionId) {
-      intervalId = setInterval(() => {
-        refreshSessionStats(sessionId);
-      }, 3000);
-    }
-    return () => clearInterval(intervalId);
-  }, [sessionId, isMindfulActive]);
 
   // Recover or start session on mount / user change
   useEffect(() => {
@@ -268,6 +293,10 @@ function App() {
     // NEW: Reset refs for analytics tracking
     seenVideoIdsRef.current = new Set();
     prevFatigueRef.current = 0;
+    touchGrassWarnedRef.current = false;
+    videoCountAtWarningRef.current = 0;
+    stage1ShownRef.current = false;
+    localVideoCountRef.current = 0;
   }, [user?.id]);
 
   const handleLoginSuccess = async (userData: { id: string; username: string }, token: string) => {
@@ -303,6 +332,10 @@ function App() {
     setFatigueScore(0);
     setIsMindfulActive(false);
     setShowTouchGrassModal(false);
+    touchGrassWarnedRef.current = false;
+    videoCountAtWarningRef.current = 0;
+    stage1ShownRef.current = false;
+    localVideoCountRef.current = 0;
   };
 
   const simulateDoomscroll = async () => {
@@ -357,6 +390,10 @@ function App() {
         setIntensityCounts({});
         seenVideoIdsRef.current = new Set();
         prevFatigueRef.current = 0;
+        touchGrassWarnedRef.current = false;
+        videoCountAtWarningRef.current = 0;
+        stage1ShownRef.current = false;
+        localVideoCountRef.current = 0;
         setAccumulatedVideos([]);
         setExcludeIds([]); // clear exclude list for fresh session
         // Reset fetch key to 1 → new SWR cache key → forces fresh fetch for new session
@@ -372,6 +409,10 @@ function App() {
       setIntensityCounts({});
       seenVideoIdsRef.current = new Set();
       prevFatigueRef.current = 0;
+      touchGrassWarnedRef.current = false;
+      videoCountAtWarningRef.current = 0;
+      stage1ShownRef.current = false;
+      localVideoCountRef.current = 0;
       setAccumulatedVideos([]);
       setTrendingLimit(BATCH_SIZE);
       mutateTrending();
@@ -380,12 +421,20 @@ function App() {
 
   const handleTouchGrass = async () => {
     setShowTouchGrassModal(false);
-    await resetSession();
+    // Reset all flags
+    touchGrassWarnedRef.current = false;
+    videoCountAtWarningRef.current = 0;
+    stage1ShownRef.current = false;
+    localVideoCountRef.current = 0;
+    // End session + logout → farewell screen
+    await handleLogout();
     setShowFarewell(true);
   };
 
   const handleContinueWatching = () => {
     setShowTouchGrassModal(false);
+    touchGrassWarnedRef.current = true;
+    videoCountAtWarningRef.current = localVideoCountRef.current;
   };
 
   return (
@@ -559,6 +608,7 @@ function App() {
           <TouchGrassModal
             isOpen={showTouchGrassModal}
             fatigueScore={fatigueScore}
+            stage={touchGrassStage}
             onTouchGrass={handleTouchGrass}
             onContinue={handleContinueWatching}
           />
