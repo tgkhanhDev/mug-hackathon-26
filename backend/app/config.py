@@ -25,6 +25,17 @@ class Settings(BaseSettings):
         description="Redis connection URL for session seen-set cache",
     )
 
+    # ── Celery Asynchronous Task Queue ─────────────────────────
+    CELERY_BROKER_URL: str = Field(
+        default="amqp://guest:guest@localhost:5672//",
+        description="RabbitMQ connection URL broker for Celery tasks",
+    )
+    CELERY_RESULT_BACKEND: str = Field(
+        default="redis://localhost:6379/0",
+        description="Redis result backend URL for Celery tasks",
+    )
+
+
     # ── Hugging Face / OpenAI Embedding ────────────────────────
     HF_API_TOKEN: str = Field(
         default="",

@@ -28,7 +28,7 @@ class VideoCreate(BaseModel):
 
     title: str = Field(..., min_length=1, max_length=500, description="Tiêu đề video")
     description: str = Field(..., min_length=1, max_length=2000, description="Mô tả ngắn nội dung video")
-    url: str = Field(..., min_length=1, description="URL video (S3, CDN, hoặc YouTube link)")
+    url: Optional[str] = Field(default="", description="URL video (S3, CDN, hoặc YouTube link)")
     thumbnail_url: str = Field(default="", description="URL ảnh thumbnail")
     tags: Optional[List[str]] = Field(default=None, max_length=10, description="Mảng tags phân loại nội dung")
     category: Optional[str] = Field(default=None, description=f"Nhóm lớn. Enum: {', '.join(CATEGORY_ENUM)}")
@@ -68,11 +68,12 @@ class VideoInDB(BaseModel):
 
     title: str
     description: str
-    url: str
+    url: str = ""
     thumbnail_url: str = ""
-    tags: List[str]
-    category: str
-    intensity_level: str
+    tags: List[str] = Field(default_factory=list)
+    category: str = ""
+    intensity_level: str = ""
+    status: str = Field(default="processing", description="processing, completed, failed")
     embedding: List[float] = Field(default_factory=list, description="Vector 1536-dim từ OpenAI")
     view_count: int = 0
     like_count: int = 0
@@ -93,11 +94,12 @@ class VideoResponse(BaseModel):
     id: str = Field(..., description="MongoDB ObjectId as string")
     title: str
     description: str
-    url: str
+    url: str = ""
     thumbnail_url: str = ""
-    tags: List[str]
-    category: str
-    intensity_level: str
+    tags: List[str] = Field(default_factory=list)
+    category: str = ""
+    intensity_level: str = ""
+    status: str = "processing"
     view_count: int = 0
     like_count: int = 0
     comment_count: int = 0
@@ -111,6 +113,7 @@ class VideoResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
 
 
 class VideoListResponse(BaseModel):

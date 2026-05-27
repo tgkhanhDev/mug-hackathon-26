@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 _scheduler: AsyncIOScheduler | None = None
 
 JOB_ID = "embedding_generation_job"
+CLEANUP_JOB_ID = "stuck_video_cleanup_job"
 
 
 def get_scheduler() -> AsyncIOScheduler:
@@ -67,10 +68,46 @@ async def _embedding_job() -> None:
         logger.error(f"  ❌ Embedding job error: {e}", exc_info=True)
 
 
+async def _cleanup_stuck_videos_job() -> None:
+    """
+    Quét MongoDB và chuyển trạng thái "processing" quá 15 phút thành "failed".
+    """
+    from app.repositories.video_repository import VideoRepository
+    from datetime import datetime, timedelta
+
+    logger.info(f"⏰ Stuck video cleanup job started at {datetime.utcnow().isoformat()}")
+    try:
+        repo = VideoRepository()
+        # Find videos stuck in processing status for more than 15 minutes
+        fifteen_minutes_ago = datetime.utcnow() - timedelta(minutes=15)
+        filter_query = {
+            "status": "processing",
+            "created_at": {"$lt": fifteen_minutes_ago}
+        }
+        
+        stuck_videos = await repo.find_many(filter=filter_query, limit=100)
+        if not stuck_videos:
+            logger.info("  ✅ No stuck videos found.")
+            return
+
+        stuck_ids = [video["id"] for video in stuck_videos]
+        logger.warning(f"  ⚠️ Found {len(stuck_ids)} stuck videos: {stuck_ids}. Moving to 'failed' status...")
+        
+        modified_count = await repo.update_many(
+            filter=filter_query,
+            update={"status": "failed", "updated_at": datetime.utcnow()}
+        )
+        logger.info(f"  ✅ Successfully cleaned up {modified_count} stuck videos.")
+
+    except Exception as e:
+        logger.error(f"  ❌ Stuck video cleanup job error: {e}", exc_info=True)
+
+
 def start_scheduler() -> None:
-    """Start the scheduler with the configured interval."""
+    """Start the scheduler with the configured intervals."""
     scheduler = get_scheduler()
 
+    # Register embedding job
     interval_minutes = settings.EMBEDDING_SCHEDULE_INTERVAL_MINUTES
     scheduler.add_job(
         _embedding_job,
@@ -79,9 +116,19 @@ def start_scheduler() -> None:
         name="Generate embeddings for videos",
         replace_existing=True,
     )
+
+    # Register stuck video cleanup job (every 10 minutes)
+    scheduler.add_job(
+        _cleanup_stuck_videos_job,
+        trigger=IntervalTrigger(minutes=10),
+        id=CLEANUP_JOB_ID,
+        name="Clean up stuck processing videos",
+        replace_existing=True,
+    )
+
     scheduler.start()
     logger.info(
-        f"🕐 Embedding scheduler started — interval: every {interval_minutes} minutes"
+        f"🕐 Scheduler started: embedding job (every {interval_minutes}m), stuck video cleanup (every 10m)"
     )
 
 
@@ -143,3 +190,29 @@ async def trigger_embedding_job_now() -> dict:
     """Manually trigger the embedding job immediately (on-demand)."""
     await _embedding_job()
     return {"message": "Embedding job triggered manually and completed."}
+
+
+def get_cleanup_schedule_info() -> dict:
+    """Get current cleanup scheduler status and next run time."""
+    scheduler = get_scheduler()
+
+    job = scheduler.get_job(CLEANUP_JOB_ID)
+    if job:
+        return {
+            "job_id": CLEANUP_JOB_ID,
+            "next_run_time": str(job.next_run_time) if job.next_run_time else None,
+            "is_running": scheduler.running,
+        }
+
+    return {
+        "job_id": CLEANUP_JOB_ID,
+        "next_run_time": None,
+        "is_running": False,
+    }
+
+
+async def trigger_cleanup_job_now() -> dict:
+    """Manually trigger the stuck video cleanup job immediately (on-demand)."""
+    await _cleanup_stuck_videos_job()
+    return {"message": "Stuck video cleanup job triggered manually and completed."}
+

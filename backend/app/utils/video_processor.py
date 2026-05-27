@@ -36,7 +36,13 @@ async def get_video_metadata(video_path: str) -> Dict[str, Any]:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
-        stdout, stderr = await proc.communicate()
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            logger.error(f"ffprobe execution timed out after 30 seconds for {video_path}")
+            return metadata
 
         if proc.returncode != 0:
             logger.warning(f"ffprobe returned non-zero code {proc.returncode}: {stderr.decode().strip()}")
@@ -102,7 +108,13 @@ async def extract_thumbnail(video_path: str, output_thumb_path: str, seek_second
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
-        stdout, stderr = await proc.communicate()
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            logger.error(f"ffmpeg thumbnail extraction timed out after 30 seconds for {video_path}")
+            return False
 
         if proc.returncode == 0 and os.path.exists(output_thumb_path):
             logger.info(f"Successfully extracted thumbnail to {output_thumb_path}")
@@ -146,7 +158,13 @@ async def create_hls_playlist(video_path: str, output_dir: str) -> bool:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
-        stdout, stderr = await proc.communicate()
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120.0)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            logger.warning(f"ffmpeg stream copy timed out after 120 seconds for {video_path}")
+            stdout, stderr = b"", b"timeout"
 
         if proc.returncode == 0 and os.path.exists(os.path.join(output_dir, "playlist.m3u8")):
             logger.info("Successfully created HLS playlist using stream copy mode.")
@@ -178,7 +196,13 @@ async def create_hls_playlist(video_path: str, output_dir: str) -> bool:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
-        stdout, stderr = await proc.communicate()
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300.0)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            logger.error(f"ffmpeg transcoding timed out after 300 seconds for {video_path}")
+            return False
 
         if proc.returncode == 0 and os.path.exists(os.path.join(output_dir, "playlist.m3u8")):
             logger.info("Successfully created HLS playlist using transcoding mode.")

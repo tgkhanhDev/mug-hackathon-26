@@ -20,7 +20,7 @@ class VideoRepository(BaseRepository):
     ) -> List[Dict[str, Any]]:
         """Find videos that match any of the given tags sorted by dynamic trending_score."""
         pipeline = [
-            {"$match": {"tags": {"$in": tags}}},
+            {"$match": {"status": "completed", "tags": {"$in": tags}}},
             build_trending_score_pipeline_stage(),
             {"$sort": {"trending_score": -1}},
             {"$limit": limit}
@@ -31,20 +31,27 @@ class VideoRepository(BaseRepository):
         self, limit: int = 10, filter_stage: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
         """Get top trending videos sorted by dynamic trending_score desc."""
-        pipeline = []
+        status_filter = {"status": "completed"}
         if filter_stage:
-            pipeline.append({"$match": filter_stage})
-        pipeline.extend([
+            match_filter = {"$and": [status_filter, filter_stage]}
+        else:
+            match_filter = status_filter
+
+        pipeline = [
+            {"$match": match_filter},
             build_trending_score_pipeline_stage(),
             {"$sort": {"trending_score": -1}},
             {"$limit": limit}
-        ])
+        ]
         return await self.aggregate(pipeline)
 
     async def find_without_embedding(self, limit: int = 100) -> List[Dict[str, Any]]:
-        """Find videos that don't have an embedding yet (for scheduler job)."""
+        """Find completed videos that don't have an embedding yet (for scheduler job fallback)."""
         return await self.find_many(
-            filter={"$or": [{"embedding": {"$exists": False}}, {"embedding": []}]},
+            filter={
+                "status": "completed",
+                "$or": [{"embedding": {"$exists": False}}, {"embedding": []}]
+            },
             limit=limit,
         )
 
@@ -74,6 +81,7 @@ class VideoRepository(BaseRepository):
             calming_categories = ["calming", "nature", "comedy", "music", "art"]
 
         match_filter: Dict[str, Any] = {
+            "status": "completed",
             "category": {"$in": calming_categories},
             "intensity_level": intensity_level,
         }
@@ -166,10 +174,10 @@ class VideoRepository(BaseRepository):
         else:
             pipeline.append({"$sort": {"total_score": -1}})
 
-        # Optional post-filter (e.g., intensity_level filtering for fatigue)
-        # Inserted at index 1 so it runs AFTER $vectorSearch fetches candidates
-        if filter_stage:
-            pipeline.insert(1, {"$match": filter_stage})
+        # Post-filter: always require status="completed"
+        status_filter = {"status": "completed"}
+        combined_filter = {"$and": [status_filter, filter_stage]} if filter_stage else status_filter
+        pipeline.insert(1, {"$match": combined_filter})
 
         # Final $limit: after post-filter exclusion, trim down to requested limit
         pipeline.append({"$limit": limit})
