@@ -108,9 +108,20 @@ export const Feed: React.FC<FeedProps> = ({
       scrollStartTop.current = null;
     }, 150);
 
-    // Calculate current active index
-    const index = Math.round(scrollPos / cardHeight);
-    if (index !== activeIndex && index >= 0 && index < videos.length) {
+    // Calculate candidate index + displacement from current active position
+    const rawOffset = scrollPos / cardHeight;
+    const candidateIndex = Math.round(rawOffset);
+    // How far user has scrolled away from the current active card (0.0-1.0)
+    const displacement = Math.abs(rawOffset - activeIndex);
+
+    const SCROLL_THRESHOLD = 0.20; // 20% card height
+
+    if (
+      candidateIndex !== activeIndex &&
+      candidateIndex >= 0 &&
+      candidateIndex < videos.length &&
+      displacement >= SCROLL_THRESHOLD
+    ) {
       // Calculate speed immediately on index change
       if (isProgrammaticScroll.current) {
         if (programmaticSpeed.current !== null) {
@@ -129,8 +140,8 @@ export const Feed: React.FC<FeedProps> = ({
       // Trigger fetch when approaching the end of the current batch (last 2 videos).
       // Guard: only fire once per batch size boundary to prevent spam.
       if (
-        index > activeIndex &&
-        index >= videos.length - 2 &&
+        candidateIndex > activeIndex &&
+        candidateIndex >= videos.length - 2 &&
         lastLoadMoreAt.current !== videos.length
       ) {
         lastLoadMoreAt.current = videos.length;
@@ -138,7 +149,7 @@ export const Feed: React.FC<FeedProps> = ({
           onLoadMore();
         }
       }
-      setActiveIndex(index);
+      setActiveIndex(candidateIndex);
     }
   };
 

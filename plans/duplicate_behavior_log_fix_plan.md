@@ -287,3 +287,215 @@ const handleVideoLeave = (videoId, duration) => {
 
 ## 🎯 Lựa Chọn Fix (Phương án tối ưu)
 
+### ✅ Chọn: Giải Pháp 1 + UI Scroll Threshold 20%
+
+**Tóm tắt:**
+- ✅ Chỉ log xem thực tế (khi rời video)
+- ✅ Luôn có `watch_duration` thực
+- ✅ Gate index change bằng ngưỡng 20%: User phải scroll ≥ 20% chiều cao card mới cho phép `setActiveIndex` + bắn `sendBehaviorLog`
+- ✅ Ngăn touchpad lướt nhẹ (ví dụ: 5-15%) gây index flicker + log rác
+
+**Kịch bản:**
+```
+User lướt/scroll (touch pad: Video 1→85%, Video 2→15%)
+  ↓ Scroll offset < 20% → KHÔNG đổi index, KHÔNG log
+  ↓
+User thả tay → snap lại Video 1 (100%)
+  ↓ Không có gì xảy ra ✅
+
+---
+
+User lướt mạnh (touch pad: Video 1→30%, Video 2→70%)
+  ↓ Scroll offset ≥ 20% → CHO PHÉP setActiveIndex(2)
+  ↓
+Video 1 cleanup effect fires → sendBehaviorLog(video1, duration=5.9s) ✅
+Video 2 starts playing ✅
+```
+
+---
+
+## 📝 Implementation Plan
+
+### Phase 1: UI Scroll Threshold Gate (Feed.tsx)
+
+**File:** `frontend/src/components/Feed.tsx`
+
+**Mục tiêu:** Chỉ cho phép `setActiveIndex` khi scroll offset vượt ngưỡng 20% chiều cao card.
+
+**Thay đổi:**
+
+```diff
+ // Feed.tsx – handleScroll function
+
++ const SCROLL_THRESHOLD = 0.20; // 20% card height
+
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const container = e.currentTarget;
+    const scrollPos = container.scrollTop;
+    const cardHeight = container.clientHeight;
+
+    // Detect scroll start
+    if (scrollStartTime.current === null) {
+      scrollStartTime.current = Date.now();
+      scrollStartTop.current = scrollPos;
+    }
+
+    if (scrollTimeout.current) {
+      clearTimeout(scrollTimeout.current);
+    }
+
+    scrollTimeout.current = setTimeout(() => {
+      scrollStartTime.current = null;
+      scrollStartTop.current = null;
+    }, 150);
+
+-   // Calculate current active index
+-   const index = Math.round(scrollPos / cardHeight);
+-   if (index !== activeIndex && index >= 0 && index < videos.length) {
++   // Calculate candidate index + displacement from current active position
++   const rawOffset = scrollPos / cardHeight;
++   const candidateIndex = Math.round(rawOffset);
++   // How far user has scrolled away from the current active card (0.0–1.0)
++   const displacement = Math.abs(rawOffset - activeIndex);
++
++   if (
++     candidateIndex !== activeIndex &&
++     candidateIndex >= 0 &&
++     candidateIndex < videos.length &&
++     displacement >= SCROLL_THRESHOLD  // ← Gate: ≥20% mới cho đổi index
++   ) {
+      // Calculate speed immediately on index change
+      if (isProgrammaticScroll.current) {
+        // ... (speed logic unchanged)
+      }
+      // ...
+-     setActiveIndex(index);
++     setActiveIndex(candidateIndex);
+    }
+  };
+```
+
+**Chi tiết logic:**
+1. `rawOffset = scrollPos / cardHeight` → vị trí scroll dạng float (ví dụ: 0.15 = 15% qua card 1)
+2. `displacement = |rawOffset - activeIndex|` → khoảng cách từ vị trí hiện tại
+3. Nếu `displacement < 0.20` → **KHÔNG** cho đổi index → snap CSS (`snap-y mandatory`) sẽ kéo lại card cũ
+4. Nếu `displacement >= 0.20` → **CHO PHÉP** đổi index → trigger cleanup effect trong VideoCard → log behavior
+
+> [!IMPORTANT]
+> `snap-y snap-mandatory` trên container sẽ tự động snap card về đúng vị trí sau khi user thả tay. Threshold 20% chỉ gate logic `setActiveIndex`, KHÔNG ảnh hưởng đến CSS scroll behavior.
+
+---
+
+### Phase 2: Bỏ Log Ngay Khi Kích Hoạt (VideoCard.tsx)
+
+**File:** `frontend/src/components/VideoCard.tsx`
+
+**Mục tiêu:** Đảm bảo behavior log chỉ được bắn trong cleanup (khi rời video), KHÔNG bắn khi video mới hiện ra.
+
+**Kiểm tra code hiện tại:**
+
+```tsx
+// VideoCard.tsx – useEffect [isActive, isInWindow]
+// Lines 111-167
+
+useEffect(() => {
+  if (isActive && isInWindow) {
+    onVideoActivated?.(videoId);       // ← Chỉ count view, KHÔNG log behavior
+    setIsPlaying(true);
+    activeStartTimeRef.current = Date.now();  // ← Bắt đầu đo thời gian
+    // ...play video...
+  }
+
+  return () => {
+    // Cleanup: BẮN LOG Ở ĐÂY
+    if (activeStartTimeRef.current !== null) {
+      const duration = (Date.now() - activeStartTimeRef.current) / 1000;
+      activeStartTimeRef.current = null;
+      // sendBehaviorLog(...)  ← ✅ Đã đúng: chỉ log khi rời
+    }
+  };
+}, [isActive, isInWindow]);
+```
+
+**Trạng thái:** ✅ Code hiện tại đã đúng — log chỉ bắn trong cleanup.
+Vấn đề **duplicate** đến từ việc `setActiveIndex` bị trigger quá nhạy (khi scroll < 20%), gây:
+1. `isActive=false` cho Video 1 → cleanup fires → log #1
+2. `isActive=true` cho Video 2 → start timer
+3. Touchpad snap lại → `isActive=false` cho Video 2 → cleanup fires → log #2 (duration ≈ 0.5s)
+4. `isActive=true` cho Video 1 → start timer
+5. User rời Video 1 thực sự → cleanup fires → log #3
+
+→ **3 logs cho 1 lần xem** ❌
+
+Với **threshold 20%**, bước 1-4 sẽ KHÔNG xảy ra vì scroll chưa vượt ngưỡng.
+
+---
+
+## 📋 Checklist Implementation
+
+| # | Task | File | Trạng thái |
+|---|------|------|-----------|
+| 1 | Thêm `SCROLL_THRESHOLD = 0.20` constant | `Feed.tsx` | ✅ Đã xong |
+| 2 | Tính `displacement` từ `rawOffset` và `activeIndex` | `Feed.tsx` | ✅ Đã xong |
+| 3 | Thêm điều kiện `displacement >= SCROLL_THRESHOLD` vào if-block | `Feed.tsx` | ✅ Đã xong |
+| 4 | Phase 2: Xác nhận `VideoCard.tsx` đã bỏ log lúc init | `VideoCard.tsx`| ✅ Đã xong |
+| 5 | Test: Touchpad lướt nhẹ (< 20%) → KHÔNG đổi index | Manual QA | ⬜ |
+| 6 | Test: Touchpad lướt mạnh (≥ 20%) → ĐỔI index + 1 log | Manual QA | ⬜ |
+| 7 | Test: Scroll chuột bình thường → hoạt động đúng | Manual QA | ⬜ |
+| 8 | Test: Swipe gesture (up/down button) → hoạt động đúng | Manual QA | ⬜ |
+| 9 | Verify: Analytics dashboard nhận đúng số lượng logs | Manual QA | ⬜ |
+
+---
+
+## 🧪 Test Cases
+
+### Test 1: Touchpad Lướt Nhẹ (< 20%)
+```
+Hành động: Dùng touchpad scroll nhẹ xuống ~10-15%
+Kỳ vọng:
+  - Video 1 vẫn active (index không đổi)
+  - CSS snap kéo lại Video 1
+  - Không có behavior_log nào được tạo
+  - Console: không có log message
+```
+
+### Test 2: Touchpad Lướt Đủ Mạnh (≥ 20%)
+```
+Hành động: Dùng touchpad scroll xuống > 20%
+Kỳ vọng:
+  - Index đổi từ 0 → 1
+  - Video 1 cleanup fires → 1 behavior_log (duration > 0.5s)
+  - Video 2 starts playing
+  - Console: "✅ [Log] Video {id}: duration=X.Xs"
+```
+
+### Test 3: Lướt Qua Lại Nhanh (Back-and-Forth)
+```
+Hành động: Scroll nhanh xuống rồi kéo lại ngay (trong 300ms)
+Kỳ vọng:
+  - Nếu chưa vượt 20%: KHÔNG đổi index, KHÔNG log
+  - Nếu vượt 20% nhưng kéo lại: index đổi rồi đổi lại, log với duration < 0.5s → bị filter
+```
+
+### Test 4: Programmatic Swipe (Button/Gesture Trigger)
+```
+Hành động: Trigger swipeTrigger prop (direction='up')
+Kỳ vọng:
+  - isProgrammaticScroll = true → bypass threshold (scroll programmatic luôn đi đủ 1 card)
+  - Index đổi bình thường
+  - Behavior log được tạo đúng khi rời video
+```
+
+> [!WARNING]
+> **Test 4 cần verify:** `isProgrammaticScroll.current = true` đã được set TRƯỚC khi `scrollTo()` gọi `handleScroll`. Kiểm tra timing: `isProgrammaticScroll` phải là `true` khi `handleScroll` fires, nếu không threshold sẽ block programmatic scroll.
+
+---
+
+## ⚠️ Edge Cases Cần Lưu Ý
+
+1. **Programmatic scroll bypass:** `isProgrammaticScroll.current === true` → bỏ qua threshold check (đã OK vì scroll programmatic luôn đi full 1 card)
+2. **Video đầu tiên:** Khi mở feed, Video 1 active tại index=0, `displacement=0` → không trigger change → OK (video đầu tiên play bình thường)
+3. **Video cuối cùng:** Nếu user scroll ở video cuối, `candidateIndex >= videos.length` bị filter → OK
+4. **CSS snap conflict:** `snap-y mandatory` sẽ snap card về integer positions. Threshold 20% chỉ gate JS logic, CSS vẫn hoạt động độc lập → OK
+5. **Session unmount:** Khi user đóng tab/navigate away, cleanup fires → log final video. Duration filter `< 0.5s` có thể miss video cuối nếu user đóng nhanh → acceptable tradeoff
+
