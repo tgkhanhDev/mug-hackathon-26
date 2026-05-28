@@ -17,7 +17,7 @@ def main():
         "tags": "test, upload, direct, python, optional",
         "category": "lifestyle",
         "intensity_level": "low",
-        "creator_id": "creator_test_script_optional",
+        "creator_id": "6a0bdf9bc0d0a93bff883daa",
     }
     
     print("Sending POST request to direct upload endpoint...")

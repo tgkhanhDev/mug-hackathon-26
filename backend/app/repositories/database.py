@@ -123,4 +123,53 @@ async def _create_indexes() -> None:
     await behavior_logs.create_index([("session_id", 1), ("timestamp", 1)])
     await behavior_logs.create_index([("user_id", 1), ("timestamp", -1)])
 
-    logger.info("  🔑 All indexes created/verified.")
+    logger.info("  🔑 All regular indexes created/verified.")
+    
+    # ── videos vector search index ─────────────────────────
+    await _create_vector_search_index()
+
+
+async def _create_vector_search_index() -> None:
+    """Create Vector Search Index for Atlas Search or local Atlas container."""
+    db = get_database()
+    videos = db["videos"]
+
+    # Check if index already exists
+    try:
+        cursor = videos.list_search_indexes()
+        async for idx in cursor:
+            if idx.get("name") == "video_embedding_index":
+                logger.info("  🔑 Vector search index 'video_embedding_index' already exists.")
+                return
+    except Exception as e:
+        logger.debug(f"Could not list search indexes: {e}")
+
+    try:
+        logger.info("  🔑 Creating vector search index 'video_embedding_index'...")
+        await db.command({
+            "createSearchIndexes": "videos",
+            "indexes": [
+                {
+                    "name": "video_embedding_index",
+                    "definition": {
+                        "mappings": {
+                            "dynamic": True,
+                            "fields": {
+                                "embedding": {
+                                    "type": "knnVector",
+                                    "dimensions": settings.EMBEDDING_DIMENSIONS,
+                                    "similarity": "cosine"
+                                }
+                            }
+                        }
+                    }
+                }
+            ]
+        })
+        logger.info("  🔑 Vector search index creation request sent successfully.")
+    except Exception as e:
+        logger.warning(
+            f"  ⚠️ Could not create Vector Search Index: {e}. "
+            f"If you are not using MongoDB Atlas or Atlas-Local, this is expected."
+        )
+

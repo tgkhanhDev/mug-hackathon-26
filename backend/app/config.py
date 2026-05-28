@@ -25,6 +25,17 @@ class Settings(BaseSettings):
         description="Redis connection URL for session seen-set cache",
     )
 
+    # ── Celery Asynchronous Task Queue ─────────────────────────
+    CELERY_BROKER_URL: str = Field(
+        default="amqp://guest:guest@localhost:5672//",
+        description="RabbitMQ connection URL broker for Celery tasks",
+    )
+    CELERY_RESULT_BACKEND: str = Field(
+        default="redis://localhost:6379/0",
+        description="Redis result backend URL for Celery tasks",
+    )
+
+
     # ── Hugging Face / OpenAI Embedding ────────────────────────
     HF_API_TOKEN: str = Field(
         default="",
@@ -70,22 +81,30 @@ class Settings(BaseSettings):
     # ── Server ─────────────────────────────────────────────────
     PORT: int = Field(default=8033, description="Server port")
 
-    # ── AWS S3 ─────────────────────────────────────────────────
-    AWS_ACCESS_KEY_ID: str = Field(
-        default="", 
-        description="AWS Access Key ID for S3 upload"
+    # ── MinIO Configuration (Dedicated Local Storage) ──────────
+    MINIO_ENDPOINT_URL: str = Field(
+        default="http://localhost:9000",
+        description="MinIO Endpoint URL"
     )
-    AWS_SECRET_ACCESS_KEY: str = Field(
-        default="", 
-        description="AWS Secret Access Key"
+    MINIO_ACCESS_KEY: str = Field(
+        default="minioadmin", 
+        description="MinIO Access Key (username)"
     )
-    AWS_REGION: str = Field(
-        default="ap-southeast-1", 
-        description="AWS Region (e.g. ap-southeast-1)"
+    MINIO_SECRET_KEY: str = Field(
+        default="minioadmin", 
+        description="MinIO Secret Key (password)"
     )
-    AWS_BUCKET_NAME: str = Field(
-        default="", 
-        description="AWS S3 Bucket Name"
+    MINIO_REGION: str = Field(
+        default="us-east-1", 
+        description="MinIO Region constraint"
+    )
+    MINIO_BUCKET_NAME: str = Field(
+        default="gotouchgrass-media", 
+        description="MinIO Bucket name"
+    )
+    MINIO_USE_SSL: bool = Field(
+        default=False,
+        description="Use SSL/HTTPS when connecting to MinIO"
     )
 
     # ── Pexels Crawler ─────────────────────────────────────────

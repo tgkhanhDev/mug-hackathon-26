@@ -11,6 +11,8 @@ from app.utils.scheduler import (
     get_schedule_info,
     update_schedule_interval,
     trigger_embedding_job_now,
+    get_cleanup_schedule_info,
+    trigger_cleanup_job_now,
 )
 
 router = APIRouter(prefix="/scheduler", tags=["Scheduler"])
@@ -69,8 +71,29 @@ async def update_embedding_schedule(
     description="Manually trigger the embedding generation job immediately, "
     "without waiting for the next scheduled run.",
 )
-
-# hàm này để embedding video
 async def trigger_embedding():
     """POST /api/v1/scheduler/embedding/trigger — Run job now."""
     return await trigger_embedding_job_now()
+
+
+@router.get(
+    "/cleanup",
+    response_model=ScheduleInfoResponse,
+    summary="Get stuck video cleanup job status",
+    description="Check the current status and next run time of the stuck video cleanup job.",
+)
+async def get_cleanup_schedule():
+    """GET /api/v1/scheduler/cleanup — Get schedule info."""
+    return get_cleanup_schedule_info()
+
+
+@router.post(
+    "/cleanup/trigger",
+    response_model=TriggerResponse,
+    summary="Trigger stuck video cleanup job now",
+    description="Manually trigger the stuck video cleanup job immediately, "
+    "without waiting for the next scheduled run.",
+)
+async def trigger_cleanup():
+    """POST /api/v1/scheduler/cleanup/trigger — Run job now."""
+    return await trigger_cleanup_job_now()

@@ -22,6 +22,64 @@ class VideoService:
     def __init__(self):
         self._repo = VideoRepository()
 
+    async def create_video_async(self, data: VideoCreate) -> VideoResponse:
+        """
+        Create a new video placeholder document asynchronously.
+        Inserts it with status 'processing'.
+        """
+        now = datetime.utcnow()
+
+        # Build placeholder DB document
+        doc = VideoInDB(
+            title=data.title,
+            description=data.description,
+            url="",
+            thumbnail_url="",
+            tags=[],
+            category="",
+            intensity_level="",
+            status="processing",
+            embedding=[],
+            view_count=data.view_count,
+            like_count=data.like_count,
+            comment_count=data.comment_count,
+            trending_score=0.0,
+            creator_id=data.creator_id,
+            duration=None,
+            width=None,
+            height=None,
+            created_at=now,
+            updated_at=now,
+        )
+
+        # Insert placeholder
+        video_id = await self._repo.insert_one(doc.model_dump())
+        logger.info(f"✅ Created video placeholder: {video_id} (status: processing)")
+
+        # We return the response immediately
+        return VideoResponse(
+            id=video_id,
+            title=data.title,
+            description=data.description,
+            url="",
+            thumbnail_url="",
+            tags=[],
+            category="",
+            intensity_level="",
+            status="processing",
+            view_count=data.view_count,
+            like_count=data.like_count,
+            comment_count=data.comment_count,
+            trending_score=0.0,
+            creator_id=data.creator_id,
+            duration=None,
+            width=None,
+            height=None,
+            has_embedding=False,
+            created_at=now,
+            updated_at=now,
+        )
+
     async def create_video(self, data: VideoCreate) -> VideoResponse:
         """
         Create a new video document.
@@ -87,11 +145,15 @@ class VideoService:
             category=data.category,
             intensity_level=data.intensity_level,
             embedding=embedding,
+            status="completed",
             view_count=data.view_count,
             like_count=data.like_count,
             comment_count=data.comment_count,
             trending_score=trending_score,
             creator_id=data.creator_id,
+            duration=data.duration,
+            width=data.width,
+            height=data.height,
             created_at=now,
             updated_at=now,
         )
@@ -110,11 +172,15 @@ class VideoService:
             tags=data.tags,
             category=data.category,
             intensity_level=data.intensity_level,
+            status="completed",
             view_count=data.view_count,
             like_count=data.like_count,
             comment_count=data.comment_count,
             trending_score=trending_score,
             creator_id=data.creator_id,
+            duration=data.duration,
+            width=data.width,
+            height=data.height,
             has_embedding=len(embedding) > 0,
             created_at=now,
             updated_at=now,
@@ -130,13 +196,14 @@ class VideoService:
     async def get_videos(
         self, skip: int = 0, limit: int = 20
     ) -> VideoListResponse:
-        """Get paginated list of videos."""
+        """Get paginated list of completed videos."""
         docs = await self._repo.find_many(
+            filter={"status": "completed"},
             skip=skip,
             limit=limit,
             sort=[("created_at", -1)],
         )
-        total = await self._repo.count()
+        total = await self._repo.count(filter={"status": "completed"})
 
         return VideoListResponse(
             items=[self._to_response(doc) for doc in docs],
@@ -168,11 +235,15 @@ class VideoService:
             tags=doc["tags"],
             category=doc["category"],
             intensity_level=doc["intensity_level"],
+            status=doc.get("status", "completed"),
             view_count=doc.get("view_count", 0),
             like_count=doc.get("like_count", 0),
             comment_count=doc.get("comment_count", 0),
             trending_score=doc.get("trending_score", 0.0),
             creator_id=doc["creator_id"],
+            duration=doc.get("duration"),
+            width=doc.get("width"),
+            height=doc.get("height"),
             has_embedding=len(embedding) > 0,
             created_at=doc["created_at"],
             updated_at=doc["updated_at"],

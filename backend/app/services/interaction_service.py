@@ -108,7 +108,6 @@ class InteractionService:
         interaction_id, *_ = await asyncio.gather(
             self._repo.insert_one(doc.model_dump()),
             self._repo.increment_video_counters(data.video_id, data.type),
-            self._session_repo.increment_videos_watched(data.session_id),
         )
 
         logger.info(
@@ -224,12 +223,22 @@ class InteractionService:
         """
         Start a new feed session for a user.
         If an active session already exists (ended_at=null), return it.
+        Also checks for recently created sessions (within 5s) to prevent race conditions.
         """
         # Check for existing active session
         existing = await self._session_repo.find_active_session(data.user_id)
         if existing:
             logger.info(f"Reusing active session {existing['id']} for user={data.user_id}")
             return self._session_to_response(existing)
+
+        # NEW: Check for recent sessions (race condition safeguard)
+        # Prevents duplicate sessions when frontend makes concurrent startSession calls
+        recent_sessions = await self._session_repo.find_recent_sessions(data.user_id, seconds=5)
+        if recent_sessions and len(recent_sessions) > 0:
+            # Reuse the most recently created session instead of creating duplicate
+            recent = recent_sessions[0]
+            logger.warning(f"⚠️ Recent session {recent['_id']} found (created {5}s ago), reusing instead of creating duplicate for user={data.user_id}")
+            return self._session_to_response(recent)
 
         now = datetime.utcnow()
         doc = FeedSessionInDB(user_id=data.user_id, started_at=now)

@@ -6,7 +6,7 @@ interface AnalyticsDashboardProps {
   fatigueHistory: number[];
   sessionVideoCount: number;
   adaptiveState: 'normal' | 'warning' | 'exhausted';
-  topicCounts: Record<string, number>;
+  intensityCounts: Record<string, number>;
   onSimulateDoomscroll: () => void;
   onResetSession: () => void;
   onTriggerSwipe: (dir: 'up' | 'down', speed: 'slow' | 'fast') => void;
@@ -17,24 +17,15 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
   fatigueHistory,
   sessionVideoCount,
   adaptiveState,
-  topicCounts,
+  intensityCounts,
   onSimulateDoomscroll,
   onResetSession,
   onTriggerSwipe
 }) => {
-  // Feed composition stats based on actual viewed topics
-  const CALMING_TOPICS = ['nature', 'meditation', 'calming', 'sleep', 'piano', 'mindfulness'];
-  const HIGH_TOPICS = ['sports', 'football', 'gaming', 'dark_humor', 'programming', 'coding', 'lifestyle'];
+  const highCount = intensityCounts['high'] || 0;
+  const mediumCount = intensityCounts['medium'] || 0;
+  const lowCount = intensityCounts['low'] || 0;
 
-  const highCount = Object.entries(topicCounts)
-    .filter(([t]) => HIGH_TOPICS.some(h => t.toLowerCase().includes(h)))
-    .reduce((sum, [, c]) => sum + c, 0);
-
-  const calmCount = Object.entries(topicCounts)
-    .filter(([t]) => CALMING_TOPICS.some(h => t.toLowerCase().includes(h)))
-    .reduce((sum, [, c]) => sum + c, 0);
-
-  const lowCount = Math.max(0, sessionVideoCount - highCount - calmCount);
   const totalAnalyzed = Math.max(1, sessionVideoCount);
 
   // Sparkline generator (200x60)
@@ -114,18 +105,18 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
             <span className="w-6 text-right text-zinc-500">{highCount}</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="w-24 text-zinc-400">Low Intensity</span>
+            <span className="w-24 text-zinc-400">Medium Intensity</span>
             <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-              <div className="h-full bg-zinc-400 rounded-full" style={{ width: `${(lowCount / totalAnalyzed) * 100}%` }} />
+              <div className="h-full bg-zinc-400 rounded-full" style={{ width: `${(mediumCount / totalAnalyzed) * 100}%` }} />
             </div>
-            <span className="w-6 text-right text-zinc-500">{lowCount}</span>
+            <span className="w-6 text-right text-zinc-500">{mediumCount}</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="w-24 text-emerald-400">Calming/Nature</span>
+            <span className="w-24 text-emerald-400">Low/Calming</span>
             <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-              <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${(calmCount / totalAnalyzed) * 100}%` }} />
+              <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${(lowCount / totalAnalyzed) * 100}%` }} />
             </div>
-            <span className="w-6 text-right text-zinc-500">{calmCount}</span>
+            <span className="w-6 text-right text-zinc-500">{lowCount}</span>
           </div>
         </div>
       </div>

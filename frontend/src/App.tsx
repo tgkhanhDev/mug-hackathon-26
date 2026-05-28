@@ -5,6 +5,8 @@ import { BottomNav } from './components/BottomNav';
 import { AuthPopup } from './components/AuthPopup';
 import { AuthContext } from './context/AuthContext';
 import { AnalyticsDashboard } from './components/AnalyticsDashboard';
+import { TouchGrassModal } from './components/TouchGrassModal';
+import { FarewellScreen } from './components/FarewellScreen';
 import { Sparkles, Brain, Leaf, ShieldAlert } from 'lucide-react';
 import {
   useTrendingVideos,
@@ -49,24 +51,48 @@ function App() {
   // Analytics Dashboard states
   const [fatigueHistory, setFatigueHistory] = useState<number[]>([]);
   const [localVideoCount, setLocalVideoCount] = useState(0);
-  const [topicCounts, setTopicCounts] = useState<Record<string, number>>({});
-  const [adaptiveState, setAdaptiveState] = useState<'normal' | 'warning' | 'exhausted'>('normal');
+  const [intensityCounts, setIntensityCounts] = useState<Record<string, number>>({});
+  const [adaptiveState, setAdaptiveState] = useState<'normal' | 'warning' | 'exhausted' | 'critical'>('normal');
   const prevFatigueRef = useRef(0);
   // Ref for seen-set dedup: tracks unique videoIds seen this session
   const seenVideoIdsRef = useRef<Set<string>>(new Set());
   // Ref mirror of accumulatedVideos for stable read inside callbacks
   const accumulatedVideosRef = useRef<any[]>([]);
 
+  // Touch Grass 2-stage flow
+  const [showTouchGrassModal, setShowTouchGrassModal] = useState(false);
+  const [touchGrassStage, setTouchGrassStage] = useState<1 | 2>(1);
+  const [showFarewell, setShowFarewell] = useState(false);
+
+  // Refs (tồn tại trong 1 session, reset khi end session/logout)
+  const touchGrassWarnedRef = useRef(false);     // đã hiện stage 1 và user chọn "tiếp tục"
+  const videoCountAtWarningRef = useRef(0);       // số video đã xem lúc stage 1 bị dismiss
+  const stage1ShownRef = useRef(false);           // guard: không show stage 1 lặp lại
+  const localVideoCountRef = useRef(0);           // mirror của localVideoCount state
+
   const handleVideoActivated = useCallback((videoId: string) => {
     if (seenVideoIdsRef.current.has(videoId)) return; // Already counted
     seenVideoIdsRef.current.add(videoId);
 
-    // Look up topic from the video list (read from ref, no closure issue)
+    // Look up intensity_level from the video list (read from ref, no closure issue)
     const video = accumulatedVideosRef.current.find((v: any) => v.id === videoId);
-    const topic: string = (video?.tags && video.tags.length > 0) ? video.tags[0] : 'general';
+    const intensity: string = video?.intensity_level || 'medium';
 
-    setLocalVideoCount(prev => prev + 1);
-    setTopicCounts(prev => ({ ...prev, [topic]: (prev[topic] || 0) + 1 }));
+    setLocalVideoCount(prev => {
+      localVideoCountRef.current = prev + 1;
+      return prev + 1;
+    });
+    setIntensityCounts(prev => ({ ...prev, [intensity]: (prev[intensity] || 0) + 1 }));
+
+    // Check stage 2 trigger ngay khi video mới được activate
+    if (
+      touchGrassWarnedRef.current &&
+      localVideoCountRef.current - videoCountAtWarningRef.current >= 3
+    ) {
+      touchGrassWarnedRef.current = false;
+      setTouchGrassStage(2);
+      setShowTouchGrassModal(true);
+    }
   }, []);
 
   // Pagination / Infinite Scroll states
@@ -122,6 +148,9 @@ function App() {
 
   const [accumulatedVideos, setAccumulatedVideos] = useState<any[]>([]);
 
+  // Guard to prevent concurrent session creation (race condition safeguard)
+  const isCreatingSessionRef = useRef(false);
+
   useEffect(() => {
     if (currentVideos && currentVideos.length > 0) {
       setAccumulatedVideos(prev => {
@@ -161,10 +190,29 @@ function App() {
       const sessionData = await getSession(sid);
       const newScore = Math.round(sessionData.fatigue_score);
       const newAdaptiveState = sessionData.adaptive_state;
-      const isExhaustedOrWarning = newAdaptiveState === 'warning' || newAdaptiveState === 'exhausted';
+      const isExhaustedOrWarning = newAdaptiveState === 'warning' || newAdaptiveState === 'exhausted' || newAdaptiveState === 'critical';
 
-      setAdaptiveState(newAdaptiveState as 'normal' | 'warning' | 'exhausted');
+
+
+      setAdaptiveState(newAdaptiveState as 'normal' | 'warning' | 'exhausted' | 'critical');
       setFatigueScore(newScore);
+
+      // --- Stage 1: Cảnh báo lần đầu khi fatigue >= 30% ---
+      if (newScore >= 30 && !stage1ShownRef.current && !touchGrassWarnedRef.current) {
+        stage1ShownRef.current = true;
+        setTouchGrassStage(1);
+        setShowTouchGrassModal(true);
+      }
+
+      // --- Stage 2: Force quit nếu user đã bỏ qua cảnh báo + xem thêm 3 video ---
+      if (
+        touchGrassWarnedRef.current &&
+        localVideoCountRef.current - videoCountAtWarningRef.current >= 3
+      ) {
+        touchGrassWarnedRef.current = false;  // prevent re-trigger
+        setTouchGrassStage(2);
+        setShowTouchGrassModal(true);
+      }
 
       // Only trigger feed refetch when mindful state ACTUALLY changes,
       // AND not on the very first load (SWR already fetched automatically)
@@ -196,20 +244,16 @@ function App() {
     prevFatigueRef.current = curr;
   }, [fatigueScore]);
 
-  // Polling for Analytics Dashboard
-  useEffect(() => {
-    let intervalId: any;
-    if (sessionId) {
-      intervalId = setInterval(() => {
-        refreshSessionStats(sessionId);
-      }, 3000);
-    }
-    return () => clearInterval(intervalId);
-  }, [sessionId, isMindfulActive]);
-
   // Recover or start session on mount / user change
   useEffect(() => {
     if (user && !sessionId) {
+      // NEW: Prevent concurrent session creation (race condition safeguard)
+      if (isCreatingSessionRef.current) {
+        console.warn('⚠️ Session creation already in progress, skipping duplicate');
+        return;
+      }
+      isCreatingSessionRef.current = true;
+
       startSession(user.id)
         .then((session) => {
           setSessionId(session.id);
@@ -217,7 +261,11 @@ function App() {
           connectSessionWS(session.id);
           refreshSessionStats(session.id);
         })
-        .catch(console.error);
+        .catch(console.error)
+        .finally(() => {
+          // NEW: Clear flag to allow future session creation if needed
+          isCreatingSessionRef.current = false;
+        });
     } else if (sessionId) {
       connectSessionWS(sessionId);
       refreshSessionStats(sessionId);
@@ -226,11 +274,29 @@ function App() {
 
   // Reset accumulated videos and limits on user login/logout
   useEffect(() => {
+    // Reset feed/video states
     setAccumulatedVideos([]);
     setExcludeIds([]); // clear exclude list for fresh user
     setFeedFetchKey(0); // reset fetch key so new user starts from batch 0
     // feedLimit is constant (BATCH_SIZE), no need to reset it
     setTrendingLimit(BATCH_SIZE);
+
+    // NEW: Reset analytics states (fix for cache not clearing on login/register)
+    setFatigueScore(0);
+    setIsMindfulActive(false);
+    setFatigueHistory([]);
+    setLocalVideoCount(0);
+    setIntensityCounts({});
+    setAdaptiveState('normal');
+    setShowTouchGrassModal(false);
+
+    // NEW: Reset refs for analytics tracking
+    seenVideoIdsRef.current = new Set();
+    prevFatigueRef.current = 0;
+    touchGrassWarnedRef.current = false;
+    videoCountAtWarningRef.current = 0;
+    stage1ShownRef.current = false;
+    localVideoCountRef.current = 0;
   }, [user?.id]);
 
   const handleLoginSuccess = async (userData: { id: string; username: string }, token: string) => {
@@ -265,6 +331,11 @@ function App() {
 
     setFatigueScore(0);
     setIsMindfulActive(false);
+    setShowTouchGrassModal(false);
+    touchGrassWarnedRef.current = false;
+    videoCountAtWarningRef.current = 0;
+    stage1ShownRef.current = false;
+    localVideoCountRef.current = 0;
   };
 
   const simulateDoomscroll = async () => {
@@ -316,9 +387,13 @@ function App() {
         setIsMindfulActive(false);
         setFatigueHistory([]);
         setLocalVideoCount(0);
-        setTopicCounts({});
+        setIntensityCounts({});
         seenVideoIdsRef.current = new Set();
         prevFatigueRef.current = 0;
+        touchGrassWarnedRef.current = false;
+        videoCountAtWarningRef.current = 0;
+        stage1ShownRef.current = false;
+        localVideoCountRef.current = 0;
         setAccumulatedVideos([]);
         setExcludeIds([]); // clear exclude list for fresh session
         // Reset fetch key to 1 → new SWR cache key → forces fresh fetch for new session
@@ -331,13 +406,35 @@ function App() {
       setIsMindfulActive(false);
       setFatigueHistory([]);
       setLocalVideoCount(0);
-      setTopicCounts({});
+      setIntensityCounts({});
       seenVideoIdsRef.current = new Set();
       prevFatigueRef.current = 0;
+      touchGrassWarnedRef.current = false;
+      videoCountAtWarningRef.current = 0;
+      stage1ShownRef.current = false;
+      localVideoCountRef.current = 0;
       setAccumulatedVideos([]);
       setTrendingLimit(BATCH_SIZE);
       mutateTrending();
     }
+  };
+
+  const handleTouchGrass = async () => {
+    setShowTouchGrassModal(false);
+    // Reset all flags
+    touchGrassWarnedRef.current = false;
+    videoCountAtWarningRef.current = 0;
+    stage1ShownRef.current = false;
+    localVideoCountRef.current = 0;
+    // End session + logout → farewell screen
+    await handleLogout();
+    setShowFarewell(true);
+  };
+
+  const handleContinueWatching = () => {
+    setShowTouchGrassModal(false);
+    touchGrassWarnedRef.current = true;
+    videoCountAtWarningRef.current = localVideoCountRef.current;
   };
 
   return (
@@ -383,11 +480,13 @@ function App() {
           </div>
 
           {/* Real-time Well-being Overlay Indicator (Premium Animated Bar) */}
-          <div className={`absolute top-16 left-4 right-4 z-40 backdrop-blur-md rounded-2xl p-3 border shadow-lg transition-all duration-700 ${fatigueScore > 70
-            ? 'bg-rose-950/80 border-rose-500/40 shadow-rose-500/20'
-            : fatigueScore > 40
-              ? 'bg-amber-950/80 border-amber-500/30 shadow-amber-500/10'
-              : 'bg-zinc-900/80 border-zinc-800/80'
+          <div className={`absolute top-16 left-4 right-4 z-40 backdrop-blur-md rounded-2xl p-3 border shadow-lg transition-all duration-700 ${fatigueScore >= 80
+            ? 'bg-rose-950/90 border-rose-500/70 shadow-rose-500/50 animate-pulse ring-1 ring-rose-500/30'
+            : fatigueScore > 70
+              ? 'bg-rose-950/80 border-rose-500/40 shadow-rose-500/20'
+              : fatigueScore > 40
+                ? 'bg-amber-950/80 border-amber-500/30 shadow-amber-500/10'
+                : 'bg-zinc-900/80 border-zinc-800/80'
             }`}>
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
@@ -397,7 +496,11 @@ function App() {
                   <span className="text-[10px] text-zinc-400 font-medium">Chỉ số Mệt mỏi (Fatigue)</span>
                   <span className="text-xs font-bold text-white flex items-center gap-1.5">
                     {fatigueScore}%
-                    {fatigueScore > 70 ? (
+                    {fatigueScore >= 80 ? (
+                      <span className="text-[9px] bg-rose-600/30 text-rose-300 px-1.5 py-0.5 rounded-full font-semibold border border-rose-500/50 animate-pulse shadow-[0_0_8px_rgba(225,29,72,0.4)]">
+                        💀 Nguy hiểm — Hãy nghỉ ngơi ngay!
+                      </span>
+                    ) : fatigueScore > 70 ? (
                       <span className="text-[9px] bg-rose-500/20 text-rose-300 px-1.5 py-0.5 rounded-full font-semibold border border-rose-500/30 animate-pulse">
                         🔥 Kiệt sức — Đang can thiệp
                       </span>
@@ -501,6 +604,16 @@ function App() {
             onLogout={handleLogout}
           />
 
+          {/* Touch Grass Overlay Components */}
+          <TouchGrassModal
+            isOpen={showTouchGrassModal}
+            fatigueScore={fatigueScore}
+            stage={touchGrassStage}
+            onTouchGrass={handleTouchGrass}
+            onContinue={handleContinueWatching}
+          />
+          {showFarewell && <FarewellScreen onDismiss={() => setShowFarewell(false)} />}
+
         </div>
 
         {/* Analytics Dashboard (Outside phone frame, replacing old Control Panel) */}
@@ -510,7 +623,7 @@ function App() {
             fatigueHistory={fatigueHistory}
             sessionVideoCount={localVideoCount}
             adaptiveState={adaptiveState}
-            topicCounts={topicCounts}
+            intensityCounts={intensityCounts}
             onSimulateDoomscroll={simulateDoomscroll}
             onResetSession={resetSession}
             onTriggerSwipe={triggerSwipe}
