@@ -1,9 +1,13 @@
-import React, { useRef, useState, useEffect, useContext, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useContext, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { Heart, MessageCircle, Bookmark, Share2, Music } from 'lucide-react';
 import { useInView } from 'react-intersection-observer';
 import { useVideoStats } from '../hooks/useVideoStats';
 import { sendInteraction, sendBehaviorLog } from '../api/client';
 import { AuthContext } from '../context/AuthContext';
+
+export interface VideoCardHandle {
+  flushLog: () => void;
+}
 
 interface VideoCardProps {
   videoUrl: string;
@@ -30,7 +34,7 @@ interface VideoCardProps {
  *  All other cards render a lightweight placeholder <div> to free GPU decoders. */
 const WINDOW_SIZE = 2;
 
-export const VideoCard: React.FC<VideoCardProps> = ({
+export const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(({
   videoUrl,
   username,
   description,
@@ -49,7 +53,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
   onRefreshSessionStats,
   swipeSpeed,
   onVideoActivated
-}) => {
+}, ref) => {
   // Sliding-window virtualization: only render <video> for nearby cards
   const isInWindow = Math.abs(index - activeIndex) <= WINDOW_SIZE;
   const { ref: inViewRef } = useInView({ threshold: 0.7 });
@@ -108,6 +112,36 @@ export const VideoCard: React.FC<VideoCardProps> = ({
     };
   }, [userId, sessionId, videoId, topic, isLiked, hasCommented, swipeSpeed]);
 
+  const flushBehaviorLog = () => {
+    if (activeStartTimeRef.current !== null) {
+      const duration = (Date.now() - activeStartTimeRef.current) / 1000;
+      activeStartTimeRef.current = null;
+
+      const params = logParamsRef.current;
+      if (params.userId && params.sessionId && activeSessionIdRef.current === params.sessionId) {
+        if (duration > 0.1) {
+          const wasInteracted = params.isLiked || params.hasCommented || replayCountRef.current > 0;
+
+          sendBehaviorLog(
+            params.videoId,
+            params.topic,
+            params.userId,
+            params.sessionId,
+            params.swipeSpeed,
+            duration,
+            wasInteracted
+          ).then(() => {
+            onRefreshSessionStats();
+          });
+        }
+      }
+    }
+  };
+
+  useImperativeHandle(ref, () => ({
+    flushLog: flushBehaviorLog
+  }));
+
   useEffect(() => {
     if (isActive && isInWindow) {
       // Fire once per unique video activation so parent can count unique views
@@ -133,37 +167,11 @@ export const VideoCard: React.FC<VideoCardProps> = ({
 
     return () => {
       // Cleanup runs when card becomes inactive or unmounts
-      if (activeStartTimeRef.current !== null) {
-        const duration = (Date.now() - activeStartTimeRef.current) / 1000;
-        activeStartTimeRef.current = null;
-
-        // Always log — even fast scrolls (<200ms) matter for fatigue tracking.
-        // swipeSpeed value distinguishes doom-scroll from mindful browsing.
-
-        const params = logParamsRef.current;
-        // Only send behavior log if the video started playing under a valid session and that session is still the active one
-        if (params.userId && params.sessionId && activeSessionIdRef.current === params.sessionId) {
-          const wasInteracted = params.isLiked || params.hasCommented || replayCountRef.current > 0;
-
-          sendBehaviorLog(
-            params.videoId,
-            params.topic,
-            params.userId,
-            params.sessionId,
-            params.swipeSpeed,
-            duration,
-            wasInteracted
-          ).then(() => {
-            onRefreshSessionStats();
-          });
-
-          // Removed default interactions (skip/passive_view) as requested.
-          // Only explicit user actions will trigger sendInteraction now.
-        }
-      }
+      flushBehaviorLog();
     };
     // isInWindow ensures effect re-runs when video element transitions from
     // placeholder <div> → real <video> while card is already active
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive, isInWindow]);
 
   const handleLike = async () => {
@@ -364,4 +372,4 @@ export const VideoCard: React.FC<VideoCardProps> = ({
 
     </div>
   );
-};
+});
