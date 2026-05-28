@@ -25,3 +25,43 @@ services:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
     restart: always
+
+  mongodb:
+    image: mongodb/mongodb-atlas-local:latest
+    container_name: gotouchgrass-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-atlas-data:/data/db
+      - mongo-atlas-config:/data/configdb
+      - mongo-atlas-search:/data/mongot
+    restart: always
+
+  redis:
+    image: redis:alpine
+    container_name: gotouchgrass-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./redis_data:/data
+    restart: always
+
+  mongo-express:
+    image: mongo-express:latest
+    container_name: gotouchgrass-mongo-express
+    ports:
+      - "8081:8081"
+    environment:  
+      ME_CONFIG_MONGODB_SERVER: ${ME_CONFIG_MONGODB_SERVER:-mongodb}
+      ME_CONFIG_MONGODB_PORT: 27017
+      ME_CONFIG_MONGODB_ENABLE_ADMIN: "true"
+      ME_CONFIG_BASICAUTH_USERNAME: admin
+      ME_CONFIG_BASICAUTH_PASSWORD: pass
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: always
+
+volumes:
+  mongo-atlas-data:
+  mongo-atlas-config:
+  mongo-atlas-search:

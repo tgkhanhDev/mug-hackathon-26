@@ -155,3 +155,15 @@ videos/
 minio_data/
 temp_*
 *.tmp
+
+# Docker volume data directories (owned by root, do NOT commit)
+mongo_data/
+mongo_atlas_data/
+mongo_atlas_config/
+mongo_atlas_search/
+mongot_data/
+redis_data/
+
+# Crawled user data (contains sensitive info, generated at runtime)
+users.json
+.env.bak
