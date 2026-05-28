@@ -33,6 +33,7 @@ from app.utils.exceptions import NotFoundException, ValidationException
 from bson import ObjectId
 
 from app.repositories.redis_client import add_seen_video
+from app.utils.redis import publish_session_update
 
 from app.utils.formula import (
     calculate_ema_vector,
@@ -421,6 +422,12 @@ class InteractionService:
             }
             await self._session_repo.update_session_stats(session_id, stats)
             logger.info(f"Updated session {session_id} fatigue: {fatigue_score:.2f} | state: {adaptive_state}")
+
+            # Push update to SSE subscribers via Redis Pub/Sub (fire-and-forget)
+            # So that frontend can receive the update immediately without polling
+            asyncio.create_task(
+                publish_session_update(session_id, fatigue_score, adaptive_state)
+            )
 
         except Exception as exc:
             logger.error(f"Failed to calculate fatigue for session {session_id}: {exc}")

@@ -25,7 +25,6 @@ interface VideoCardProps {
   topic: string;
   userId: string | null;
   sessionId: string | null;
-  onRefreshSessionStats: (activeSessionId?: string | null) => Promise<void>;
   swipeSpeed: number;
   onVideoActivated?: (videoId: string) => void;
 }
@@ -50,7 +49,6 @@ export const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(({
   topic,
   userId,
   sessionId,
-  onRefreshSessionStats,
   swipeSpeed,
   onVideoActivated
 }, ref) => {
@@ -167,7 +165,33 @@ export const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(({
 
     return () => {
       // Cleanup runs when card becomes inactive or unmounts
-      flushBehaviorLog();
+      if (activeStartTimeRef.current !== null) {
+        const duration = (Date.now() - activeStartTimeRef.current) / 1000;
+        activeStartTimeRef.current = null;
+
+        // Always log — even fast scrolls (<200ms) matter for fatigue tracking.
+        // swipeSpeed value distinguishes doom-scroll from mindful browsing.
+
+        const params = logParamsRef.current;
+        // Only send behavior log if the video started playing under a valid session and that session is still the active one
+        if (params.userId && params.sessionId && activeSessionIdRef.current === params.sessionId) {
+          const wasInteracted = params.isLiked || params.hasCommented || replayCountRef.current > 0;
+
+          sendBehaviorLog(
+            params.videoId,
+            params.topic,
+            params.userId,
+            params.sessionId,
+            params.swipeSpeed,
+            duration,
+            wasInteracted
+          );
+          // SSE stream will push the updated fatigue_score automatically
+
+          // Removed default interactions (skip/passive_view) as requested.
+          // Only explicit user actions will trigger sendInteraction now.
+        }
+      }
     };
     // isInWindow ensures effect re-runs when video element transitions from
     // placeholder <div> → real <video> while card is already active

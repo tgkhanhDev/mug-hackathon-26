@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { connectSessionWS, disconnectSessionWS } from './hooks/useVideoStats';
-import { Feed, type FeedHandle } from './components/Feed';
+import { useSessionSSE } from './hooks/useSessionSSE';
+import { Feed } from './components/Feed';
 import { BottomNav } from './components/BottomNav';
 import { AuthPopup } from './components/AuthPopup';
 import { AuthContext } from './context/AuthContext';
@@ -13,7 +14,6 @@ import {
   usePersonalizedFeed,
   startSession,
   endSession,
-  getSession,
   sendBehaviorLog,
   sendInteraction
 } from './api/client';
@@ -204,52 +204,48 @@ function App() {
     tags: v.tags
   })) : [];
 
-  const refreshSessionStats = async (activeSessionId?: string | null) => {
-    const sid = activeSessionId !== undefined ? activeSessionId : sessionId;
-    if (!sid) return;
-    try {
-      const sessionData = await getSession(sid);
-      const newScore = Math.round(sessionData.fatigue_score);
-      const newAdaptiveState = sessionData.adaptive_state;
-      const isExhaustedOrWarning = newAdaptiveState === 'warning' || newAdaptiveState === 'exhausted' || newAdaptiveState === 'critical';
+  // ── SSE: receive real-time fatigue updates (replaces 3s polling) ──────────
+  const handleSSEMessage = useCallback(({ fatigue_score, adaptive_state }: { fatigue_score: number; adaptive_state: string }) => {
+    const newScore = Math.round(fatigue_score);
+    const isExhaustedOrWarning =
+      adaptive_state === 'warning' ||
+      adaptive_state === 'exhausted' ||
+      adaptive_state === 'critical';
 
+    setAdaptiveState(adaptive_state as 'normal' | 'warning' | 'exhausted' | 'critical');
+    setFatigueScore(newScore);
 
-
-      setAdaptiveState(newAdaptiveState as 'normal' | 'warning' | 'exhausted' | 'critical');
-      setFatigueScore(newScore);
-
-      // --- Stage 1: Cảnh báo lần đầu khi fatigue >= 30% ---
-      if (newScore >= 30 && !stage1ShownRef.current && !touchGrassWarnedRef.current) {
-        stage1ShownRef.current = true;
-        setTouchGrassStage(1);
-        setShowTouchGrassModal(true);
-      }
-
-      // --- Stage 2: Force quit nếu user đã bỏ qua cảnh báo + xem thêm 3 video ---
-      if (
-        touchGrassWarnedRef.current &&
-        localVideoCountRef.current - videoCountAtWarningRef.current >= 3
-      ) {
-        touchGrassWarnedRef.current = false;  // prevent re-trigger
-        setTouchGrassStage(2);
-        setShowTouchGrassModal(true);
-      }
-
-      // Only trigger feed refetch when mindful state ACTUALLY changes,
-      // AND not on the very first load (SWR already fetched automatically)
-      if (isExhaustedOrWarning !== isMindfulActive && hasInitialFeedFetched.current) {
-        setIsMindfulActive(isExhaustedOrWarning);
-        if (user) {
-          mutateFeed();
-        }
-      } else {
-        setIsMindfulActive(isExhaustedOrWarning);
-      }
-      hasInitialFeedFetched.current = true;
-    } catch (error) {
-      console.error('Error fetching session stats:', error);
+    // --- Stage 1: Cảnh báo lần đầu khi fatigue >= 30% ---
+    if (newScore >= 30 && !stage1ShownRef.current && !touchGrassWarnedRef.current) {
+      stage1ShownRef.current = true;
+      setTouchGrassStage(1);
+      setShowTouchGrassModal(true);
     }
-  };
+
+    // --- Stage 2: Force quit nếu user đã bỏ qua cảnh báo + xem thêm 3 video ---
+    if (
+      touchGrassWarnedRef.current &&
+      localVideoCountRef.current - videoCountAtWarningRef.current >= 3
+    ) {
+      touchGrassWarnedRef.current = false;
+      setTouchGrassStage(2);
+      setShowTouchGrassModal(true);
+    }
+
+    // Only trigger feed refetch when mindful state ACTUALLY changes,
+    // AND not on the very first load (SWR already fetched automatically)
+    if (isExhaustedOrWarning !== isMindfulActive && hasInitialFeedFetched.current) {
+      setIsMindfulActive(isExhaustedOrWarning);
+      if (user) {
+        mutateFeed();
+      }
+    } else {
+      setIsMindfulActive(isExhaustedOrWarning);
+    }
+    hasInitialFeedFetched.current = true;
+  }, [isMindfulActive, user, mutateFeed]);
+
+  useSessionSSE(sessionId, handleSSEMessage);
 
   // Track fatigue thresholds for sparkline and future event log re-enablement
   useEffect(() => {
@@ -280,7 +276,7 @@ function App() {
           setSessionId(session.id);
           localStorage.setItem('session_id', session.id);
           connectSessionWS(session.id);
-          refreshSessionStats(session.id);
+          // SSE will push the initial state once connected — no manual fetch needed
         })
         .catch(console.error)
         .finally(() => {
@@ -289,7 +285,7 @@ function App() {
         });
     } else if (sessionId) {
       connectSessionWS(sessionId);
-      refreshSessionStats(sessionId);
+      // SSE stream starts automatically via useSessionSSE hook
     }
   }, [user]);
 
@@ -381,9 +377,7 @@ function App() {
         0.5,
         950.0
       );
-      setTimeout(() => {
-        refreshSessionStats();
-      }, 500);
+      // SSE will push the updated fatigue score automatically — no setTimeout needed
     } else {
       // Fallback simulation when logged out
       setFatigueScore(prev => {
@@ -593,7 +587,6 @@ function App() {
               videos={feedVideos}
               userId={user ? user.id : null}
               sessionId={sessionId}
-              onRefreshSessionStats={refreshSessionStats}
               swipeTrigger={swipeTrigger}
               onVideoActivated={handleVideoActivated}
               onLoadMore={() => {
