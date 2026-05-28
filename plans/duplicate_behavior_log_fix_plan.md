@@ -1,16 +1,10 @@
-# 🔧 Kế Hoạch Fix: Duplicate Behavior Log + Các Edge Case Touch Pad
+🔧 Kế Hoạch Fix: Duplicate Behavior Log + Các Edge Case Touch Pad
+Ngày tạo: 27/05/2026
+Vấn đề: CÓ NHIỀU behavior_log được tạo cho cùng 1 video trong 1 session
+Trạng thái: Chờ Review
 
-**Ngày tạo:** 27/05/2026  
-**Vấn đề:** CÓ NHIỀU behavior_log được tạo cho cùng 1 video trong 1 session  
-**Trạng thái:** Chờ Review
-
----
-
-## 📋 Phân Tích Vấn Đề
-
-### Luồng Hiện Tại (CÓ BUG) ❌
-
-```
+📋 Phân Tích Vấn Đề
+Luồng Hiện Tại (CÓ BUG) ❌
 User mở Feed
   ↓
 Video 1 được hiển thị (70% màn hình)
@@ -41,40 +35,33 @@ User thả tay (kéo lại Video 1→70%)
   }
 
 KẾT QUẢ: 3 logs cho 2 videos = TRÙNG LẶP ❌
-```
+Các Nguyên Nhân Gốc 🎯
+Log ngay khi video được kích hoạt
 
-### Các Nguyên Nhân Gốc 🎯
+Khi video hiện lên, log được tạo ngay với watch_duration=0
+Vấn đề: User chưa xem gì cả
+Nên: Chỉ log khi rời video (khi biết thời gian xem thực)
+Không có Deduplication
 
-1. **Log ngay khi video được kích hoạt** 
-   - Khi video hiện lên, log được tạo ngay với watch_duration=0
-   - Vấn đề: User chưa xem gì cả
-   - Nên: Chỉ log khi rời video (khi biết thời gian xem thực)
+Cùng (sessionId, videoId) có thể được log nhiều lần
+Touch pad tạo events nhanh
+Không kiểm tra xem log trùng không
+Touch Pad Edge Case
 
-2. **Không có Deduplication**
-   - Cùng (sessionId, videoId) có thể được log nhiều lần
-   - Touch pad tạo events nhanh
-   - Không kiểm tra xem log trùng không
+Touch pad tạo events scroll nhanh qua lại
+Mỗi "rời" video = 1 log
+Chuột bình thường không có vấn đề này
+Lướt Qua Lại (Back-and-Forth)
 
-3. **Touch Pad Edge Case**
-   - Touch pad tạo events scroll nhanh qua lại
-   - Mỗi "rời" video = 1 log
-   - Chuột bình thường không có vấn đề này
+Khi user lướt Video 1 → 70% → 30% → quay lại 70%
+Code hiện tại cứ mỗi thay đổi là tính "rời" video trước
+Nên: Bỏ qua lướt qua lại nếu trong cùng 1 gesture
+✅ Các Giải Pháp Được Đề Xuất
+Giải Pháp 1: Bỏ Log Ngay Khi Kích Hoạt (RECOMMENDED)
+Cách tiếp cận: Chỉ log khi user rời video, KHÔNG log khi nó hiện ra.
 
-4. **Lướt Qua Lại (Back-and-Forth)**
-   - Khi user lướt Video 1 → 70% → 30% → quay lại 70%
-   - Code hiện tại cứ mỗi thay đổi là tính "rời" video trước
-   - Nên: Bỏ qua lướt qua lại nếu trong cùng 1 gesture
+Điểm trừ vs điểm cộng:
 
----
-
-## ✅ Các Giải Pháp Được Đề Xuất
-
-### **Giải Pháp 1: Bỏ Log Ngay Khi Kích Hoạt (RECOMMENDED)**
-
-**Cách tiếp cận:** Chỉ log khi user **rời video**, KHÔNG log khi nó hiện ra.
-
-**Điểm trừ vs điểm cộng:**
-```
 CŨ (Hiện tại - Có bug):
   ✅ Capture mọi video vào viewport
   ❌ Log videos user chưa xem thực sự (duration=0)
@@ -85,10 +72,8 @@ MỚI (Đề xuất):
   ✅ Luôn có watch_duration thực
   ❌ Có thể miss video đầu nếu user đóng app (hiếm)
   ❌ Video đầu không được log nếu session kết thúc ngay
-```
+Cài đặt:
 
-**Cài đặt:**
-```tsx
 // TRƯỚC (Hiện tại - Có bug)
 const handleVideoActivated = (videoId) => {
   // ❌ Cái này tạo log ngay với duration=0
@@ -112,18 +97,13 @@ const handleVideoLeave = (videoId, duration) => {
     sendBehaviorLog(videoId, topic, duration, swipeSpeed);
   }
 };
-```
+Giải Pháp 2: Thêm Deduplication (Bảo Vệ)
+Mục đích: Prevent cùng (sessionId, videoId) không được log 2 lần.
 
----
+Vị trí cài đặt: Frontend (Feed.tsx) + Backend (InteractionService)
 
-### **Giải Pháp 2: Thêm Deduplication (Bảo Vệ)**
+Deduplication ở Frontend:
 
-**Mục đích:** Prevent cùng (sessionId, videoId) không được log 2 lần.
-
-**Vị trí cài đặt:** Frontend (Feed.tsx) + Backend (InteractionService)
-
-**Deduplication ở Frontend:**
-```tsx
 // File: frontend/src/components/Feed.tsx
 
 export const Feed: React.FC<FeedProps> = ({ ... }) => {
@@ -160,10 +140,8 @@ export const Feed: React.FC<FeedProps> = ({ ... }) => {
   // Dùng cái này thay cho sendBehaviorLog
   // ...
 };
-```
+Deduplication ở Backend:
 
-**Deduplication ở Backend:**
-```python
 # File: backend/app/services/interaction_service.py
 
 async def record_behavior_log(self, data: BehaviorLogCreate) -> BehaviorLogResponse:
@@ -207,18 +185,13 @@ async def record_behavior_log(self, data: BehaviorLogCreate) -> BehaviorLogRespo
     asyncio.create_task(self._process_behavior_log_background(data, log_id, now))
     
     return self._log_to_response(doc)
-```
+Giải Pháp 3: Xử Lý Touch Pad Back-and-Forth
+Vấn đề: Touch pad tạo lựa nhanh qua lại → nhiều "rời" events.
 
----
+Giải pháp: Debounce hoặc detect pattern gesture.
 
-### **Giải Pháp 3: Xử Lý Touch Pad Back-and-Forth**
+Cách A: Debounce Scroll Events
 
-**Vấn đề:** Touch pad tạo lựa nhanh qua lại → nhiều "rời" events.
-
-**Giải pháp:** Debounce hoặc detect pattern gesture.
-
-**Cách A: Debounce Scroll Events**
-```tsx
 // File: frontend/src/components/Feed.tsx
 
 const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -235,10 +208,8 @@ const handleScroll = (offset: number) => {
     processSwipe(offset);
   }, 150);
 };
-```
+Cách B: Detect Back-and-Forth Pattern
 
-**Cách B: Detect Back-and-Forth Pattern**
-```tsx
 // File: frontend/src/components/Feed.tsx
 
 const swipeHistoryRef = useRef<Array<{
@@ -281,22 +252,16 @@ const handleVideoLeave = (videoId, duration) => {
   
   sendBehaviorLogSafe(videoId, topic, duration, swipeSpeed);
 };
-```
+🎯 Lựa Chọn Fix (Phương án tối ưu)
+✅ Chọn: Giải Pháp 1 + UI Scroll Threshold 20%
+Tóm tắt:
 
----
+✅ Chỉ log xem thực tế (khi rời video)
+✅ Luôn có watch_duration thực
+✅ Gate index change bằng ngưỡng 20%: User phải scroll ≥ 20% chiều cao card mới cho phép setActiveIndex + bắn sendBehaviorLog
+✅ Ngăn touchpad lướt nhẹ (ví dụ: 5-15%) gây index flicker + log rác
+Kịch bản:
 
-## 🎯 Lựa Chọn Fix (Phương án tối ưu)
-
-### ✅ Chọn: Giải Pháp 1 + UI Scroll Threshold 20%
-
-**Tóm tắt:**
-- ✅ Chỉ log xem thực tế (khi rời video)
-- ✅ Luôn có `watch_duration` thực
-- ✅ Gate index change bằng ngưỡng 20%: User phải scroll ≥ 20% chiều cao card mới cho phép `setActiveIndex` + bắn `sendBehaviorLog`
-- ✅ Ngăn touchpad lướt nhẹ (ví dụ: 5-15%) gây index flicker + log rác
-
-**Kịch bản:**
-```
 User lướt/scroll (touch pad: Video 1→85%, Video 2→15%)
   ↓ Scroll offset < 20% → KHÔNG đổi index, KHÔNG log
   ↓
@@ -310,21 +275,14 @@ User lướt mạnh (touch pad: Video 1→30%, Video 2→70%)
   ↓
 Video 1 cleanup effect fires → sendBehaviorLog(video1, duration=5.9s) ✅
 Video 2 starts playing ✅
-```
+📝 Implementation Plan
+Phase 1: UI Scroll Threshold Gate (Feed.tsx)
+File: frontend/src/components/Feed.tsx
 
----
+Mục tiêu: Chỉ cho phép setActiveIndex khi scroll offset vượt ngưỡng 20% chiều cao card.
 
-## 📝 Implementation Plan
+Thay đổi:
 
-### Phase 1: UI Scroll Threshold Gate (Feed.tsx)
-
-**File:** `frontend/src/components/Feed.tsx`
-
-**Mục tiêu:** Chỉ cho phép `setActiveIndex` khi scroll offset vượt ngưỡng 20% chiều cao card.
-
-**Thay đổi:**
-
-```diff
  // Feed.tsx – handleScroll function
 
 + const SCROLL_THRESHOLD = 0.20; // 20% card height
@@ -373,28 +331,21 @@ Video 2 starts playing ✅
 +     setActiveIndex(candidateIndex);
     }
   };
-```
+Chi tiết logic:
 
-**Chi tiết logic:**
-1. `rawOffset = scrollPos / cardHeight` → vị trí scroll dạng float (ví dụ: 0.15 = 15% qua card 1)
-2. `displacement = |rawOffset - activeIndex|` → khoảng cách từ vị trí hiện tại
-3. Nếu `displacement < 0.20` → **KHÔNG** cho đổi index → snap CSS (`snap-y mandatory`) sẽ kéo lại card cũ
-4. Nếu `displacement >= 0.20` → **CHO PHÉP** đổi index → trigger cleanup effect trong VideoCard → log behavior
+rawOffset = scrollPos / cardHeight → vị trí scroll dạng float (ví dụ: 0.15 = 15% qua card 1)
+displacement = |rawOffset - activeIndex| → khoảng cách từ vị trí hiện tại
+Nếu displacement < 0.20 → KHÔNG cho đổi index → snap CSS (snap-y mandatory) sẽ kéo lại card cũ
+Nếu displacement >= 0.20 → CHO PHÉP đổi index → trigger cleanup effect trong VideoCard → log behavior
+[!IMPORTANT] snap-y snap-mandatory trên container sẽ tự động snap card về đúng vị trí sau khi user thả tay. Threshold 20% chỉ gate logic setActiveIndex, KHÔNG ảnh hưởng đến CSS scroll behavior.
 
-> [!IMPORTANT]
-> `snap-y snap-mandatory` trên container sẽ tự động snap card về đúng vị trí sau khi user thả tay. Threshold 20% chỉ gate logic `setActiveIndex`, KHÔNG ảnh hưởng đến CSS scroll behavior.
+Phase 2: Bỏ Log Ngay Khi Kích Hoạt (VideoCard.tsx)
+File: frontend/src/components/VideoCard.tsx
 
----
+Mục tiêu: Đảm bảo behavior log chỉ được bắn trong cleanup (khi rời video), KHÔNG bắn khi video mới hiện ra.
 
-### Phase 2: Bỏ Log Ngay Khi Kích Hoạt (VideoCard.tsx)
+Kiểm tra code hiện tại:
 
-**File:** `frontend/src/components/VideoCard.tsx`
-
-**Mục tiêu:** Đảm bảo behavior log chỉ được bắn trong cleanup (khi rời video), KHÔNG bắn khi video mới hiện ra.
-
-**Kiểm tra code hiện tại:**
-
-```tsx
 // VideoCard.tsx – useEffect [isActive, isInWindow]
 // Lines 111-167
 
@@ -415,87 +366,59 @@ useEffect(() => {
     }
   };
 }, [isActive, isInWindow]);
-```
+Trạng thái: ✅ Code hiện tại đã đúng — log chỉ bắn trong cleanup. Vấn đề duplicate đến từ việc setActiveIndex bị trigger quá nhạy (khi scroll < 20%), gây:
 
-**Trạng thái:** ✅ Code hiện tại đã đúng — log chỉ bắn trong cleanup.
-Vấn đề **duplicate** đến từ việc `setActiveIndex` bị trigger quá nhạy (khi scroll < 20%), gây:
-1. `isActive=false` cho Video 1 → cleanup fires → log #1
-2. `isActive=true` cho Video 2 → start timer
-3. Touchpad snap lại → `isActive=false` cho Video 2 → cleanup fires → log #2 (duration ≈ 0.5s)
-4. `isActive=true` cho Video 1 → start timer
-5. User rời Video 1 thực sự → cleanup fires → log #3
+isActive=false cho Video 1 → cleanup fires → log #1
+isActive=true cho Video 2 → start timer
+Touchpad snap lại → isActive=false cho Video 2 → cleanup fires → log #2 (duration ≈ 0.5s)
+isActive=true cho Video 1 → start timer
+User rời Video 1 thực sự → cleanup fires → log #3
+→ 3 logs cho 1 lần xem ❌
 
-→ **3 logs cho 1 lần xem** ❌
+Với threshold 20%, bước 1-4 sẽ KHÔNG xảy ra vì scroll chưa vượt ngưỡng.
 
-Với **threshold 20%**, bước 1-4 sẽ KHÔNG xảy ra vì scroll chưa vượt ngưỡng.
-
----
-
-## 📋 Checklist Implementation
-
-| # | Task | File | Trạng thái |
-|---|------|------|-----------|
-| 1 | Thêm `SCROLL_THRESHOLD = 0.20` constant | `Feed.tsx` | ✅ Đã xong |
-| 2 | Tính `displacement` từ `rawOffset` và `activeIndex` | `Feed.tsx` | ✅ Đã xong |
-| 3 | Thêm điều kiện `displacement >= SCROLL_THRESHOLD` vào if-block | `Feed.tsx` | ✅ Đã xong |
-| 4 | Phase 2: Xác nhận `VideoCard.tsx` đã bỏ log lúc init | `VideoCard.tsx`| ✅ Đã xong |
-| 5 | Test: Touchpad lướt nhẹ (< 20%) → KHÔNG đổi index | Manual QA | ⬜ |
-| 6 | Test: Touchpad lướt mạnh (≥ 20%) → ĐỔI index + 1 log | Manual QA | ⬜ |
-| 7 | Test: Scroll chuột bình thường → hoạt động đúng | Manual QA | ⬜ |
-| 8 | Test: Swipe gesture (up/down button) → hoạt động đúng | Manual QA | ⬜ |
-| 9 | Verify: Analytics dashboard nhận đúng số lượng logs | Manual QA | ⬜ |
-
----
-
-## 🧪 Test Cases
-
-### Test 1: Touchpad Lướt Nhẹ (< 20%)
-```
+📋 Checklist Implementation
+#	Task	File	Trạng thái
+1	Thêm SCROLL_THRESHOLD = 0.20 constant	Feed.tsx	✅ Đã xong
+2	Tính displacement từ rawOffset và activeIndex	Feed.tsx	✅ Đã xong
+3	Thêm điều kiện displacement >= SCROLL_THRESHOLD vào if-block	Feed.tsx	✅ Đã xong
+4	Phase 2: Xác nhận VideoCard.tsx đã bỏ log lúc init	VideoCard.tsx	✅ Đã xong
+5	Test: Touchpad lướt nhẹ (< 20%) → KHÔNG đổi index	Manual QA	⬜
+6	Test: Touchpad lướt mạnh (≥ 20%) → ĐỔI index + 1 log	Manual QA	⬜
+7	Test: Scroll chuột bình thường → hoạt động đúng	Manual QA	⬜
+8	Test: Swipe gesture (up/down button) → hoạt động đúng	Manual QA	⬜
+9	Verify: Analytics dashboard nhận đúng số lượng logs	Manual QA	⬜
+🧪 Test Cases
+Test 1: Touchpad Lướt Nhẹ (< 20%)
 Hành động: Dùng touchpad scroll nhẹ xuống ~10-15%
 Kỳ vọng:
   - Video 1 vẫn active (index không đổi)
   - CSS snap kéo lại Video 1
   - Không có behavior_log nào được tạo
   - Console: không có log message
-```
-
-### Test 2: Touchpad Lướt Đủ Mạnh (≥ 20%)
-```
+Test 2: Touchpad Lướt Đủ Mạnh (≥ 20%)
 Hành động: Dùng touchpad scroll xuống > 20%
 Kỳ vọng:
   - Index đổi từ 0 → 1
   - Video 1 cleanup fires → 1 behavior_log (duration > 0.5s)
   - Video 2 starts playing
   - Console: "✅ [Log] Video {id}: duration=X.Xs"
-```
-
-### Test 3: Lướt Qua Lại Nhanh (Back-and-Forth)
-```
+Test 3: Lướt Qua Lại Nhanh (Back-and-Forth)
 Hành động: Scroll nhanh xuống rồi kéo lại ngay (trong 300ms)
 Kỳ vọng:
   - Nếu chưa vượt 20%: KHÔNG đổi index, KHÔNG log
   - Nếu vượt 20% nhưng kéo lại: index đổi rồi đổi lại, log với duration < 0.5s → bị filter
-```
-
-### Test 4: Programmatic Swipe (Button/Gesture Trigger)
-```
+Test 4: Programmatic Swipe (Button/Gesture Trigger)
 Hành động: Trigger swipeTrigger prop (direction='up')
 Kỳ vọng:
   - isProgrammaticScroll = true → bypass threshold (scroll programmatic luôn đi đủ 1 card)
   - Index đổi bình thường
   - Behavior log được tạo đúng khi rời video
-```
+[!WARNING] Test 4 cần verify: isProgrammaticScroll.current = true đã được set TRƯỚC khi scrollTo() gọi handleScroll. Kiểm tra timing: isProgrammaticScroll phải là true khi handleScroll fires, nếu không threshold sẽ block programmatic scroll.
 
-> [!WARNING]
-> **Test 4 cần verify:** `isProgrammaticScroll.current = true` đã được set TRƯỚC khi `scrollTo()` gọi `handleScroll`. Kiểm tra timing: `isProgrammaticScroll` phải là `true` khi `handleScroll` fires, nếu không threshold sẽ block programmatic scroll.
-
----
-
-## ⚠️ Edge Cases Cần Lưu Ý
-
-1. **Programmatic scroll bypass:** `isProgrammaticScroll.current === true` → bỏ qua threshold check (đã OK vì scroll programmatic luôn đi full 1 card)
-2. **Video đầu tiên:** Khi mở feed, Video 1 active tại index=0, `displacement=0` → không trigger change → OK (video đầu tiên play bình thường)
-3. **Video cuối cùng:** Nếu user scroll ở video cuối, `candidateIndex >= videos.length` bị filter → OK
-4. **CSS snap conflict:** `snap-y mandatory` sẽ snap card về integer positions. Threshold 20% chỉ gate JS logic, CSS vẫn hoạt động độc lập → OK
-5. **Session unmount:** Khi user đóng tab/navigate away, cleanup fires → log final video. Duration filter `< 0.5s` có thể miss video cuối nếu user đóng nhanh → acceptable tradeoff
-
+⚠️ Edge Cases Cần Lưu Ý
+Programmatic scroll bypass: isProgrammaticScroll.current === true → bỏ qua threshold check (đã OK vì scroll programmatic luôn đi full 1 card)
+Video đầu tiên: Khi mở feed, Video 1 active tại index=0, displacement=0 → không trigger change → OK (video đầu tiên play bình thường)
+Video cuối cùng: Nếu user scroll ở video cuối, candidateIndex >= videos.length bị filter → OK
+CSS snap conflict: snap-y mandatory sẽ snap card về integer positions. Threshold 20% chỉ gate JS logic, CSS vẫn hoạt động độc lập → OK
+Session unmount: Khi user đóng tab/navigate away, cleanup fires → log final video. Duration filter < 0.5s có thể miss video cuối nếu user đóng nhanh → acceptable tradeoff

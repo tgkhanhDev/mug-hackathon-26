@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { connectSessionWS, disconnectSessionWS } from './hooks/useVideoStats';
-import { Feed } from './components/Feed';
+import { Feed, type FeedHandle } from './components/Feed';
 import { BottomNav } from './components/BottomNav';
 import { AuthPopup } from './components/AuthPopup';
 import { AuthContext } from './context/AuthContext';
@@ -21,6 +21,7 @@ import {
 
 
 function App() {
+  const feedRef = useRef<FeedHandle>(null);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
 
   // Auth state
@@ -169,6 +170,26 @@ function App() {
     accumulatedVideosRef.current = accumulatedVideos;
   }, [accumulatedVideos]);
 
+  // Handle page close/refresh to flush logs for active video
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      feedRef.current?.flushActiveLog();
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
+
+  // Handle tab switch/minimize to flush logs for active video
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        feedRef.current?.flushActiveLog();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
+
   // Map API videos to the format expected by Feed
   const feedVideos = accumulatedVideos && accumulatedVideos.length > 0 ? accumulatedVideos.map((v, index) => ({
     id: v.id,
@@ -314,6 +335,7 @@ function App() {
   };
 
   const handleLogout = async () => {
+    feedRef.current?.flushActiveLog();
     disconnectSessionWS();
     if (sessionId) {
       try {
@@ -375,6 +397,7 @@ function App() {
   };
 
   const resetSession = async () => {
+    feedRef.current?.flushActiveLog();
     if (user && sessionId) {
       try {
         disconnectSessionWS();
@@ -420,6 +443,7 @@ function App() {
   };
 
   const handleTouchGrass = async () => {
+    feedRef.current?.flushActiveLog();
     setShowTouchGrassModal(false);
     // Reset all flags
     touchGrassWarnedRef.current = false;
@@ -565,6 +589,7 @@ function App() {
           {/* Main Snapping Feed Container */}
           <div className="flex-1 w-full h-full relative z-0">
             <Feed
+              ref={feedRef}
               videos={feedVideos}
               userId={user ? user.id : null}
               sessionId={sessionId}

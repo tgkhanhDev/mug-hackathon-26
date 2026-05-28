@@ -1,5 +1,9 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { VideoCard } from './VideoCard';
+import React, { useState, useRef, useEffect, forwardRef, useImperativeHandle } from 'react';
+import { VideoCard, type VideoCardHandle } from './VideoCard';
+
+export interface FeedHandle {
+  flushActiveLog: () => void;
+}
 
 interface VideoData {
   id: string;
@@ -24,7 +28,7 @@ interface FeedProps {
   onVideoActivated?: (videoId: string) => void;
 }
 
-export const Feed: React.FC<FeedProps> = ({
+export const Feed = forwardRef<FeedHandle, FeedProps>(({
   videos,
   userId,
   sessionId,
@@ -32,7 +36,18 @@ export const Feed: React.FC<FeedProps> = ({
   onLoadMore,
   swipeTrigger,
   onVideoActivated
-}) => {
+}, ref) => {
+  const cardRefsMap = useRef<Map<string, VideoCardHandle>>(new Map());
+
+  useImperativeHandle(ref, () => ({
+    flushActiveLog: () => {
+      const activeVideo = videos[activeIndex];
+      if (activeVideo) {
+        const activeHandle = cardRefsMap.current.get(activeVideo.id);
+        activeHandle?.flushLog();
+      }
+    }
+  }));
   const [activeIndex, setActiveIndex] = useState(0);
   const [swipeSpeed, setSwipeSpeed] = useState(0);
 
@@ -163,6 +178,13 @@ export const Feed: React.FC<FeedProps> = ({
       {videos.map((video, index) => (
         <VideoCard
           key={video.id}
+          ref={(node) => {
+            if (node) {
+              cardRefsMap.current.set(video.id, node);
+            } else {
+              cardRefsMap.current.delete(video.id);
+            }
+          }}
           index={index}
           activeIndex={activeIndex}
           videoUrl={video.videoUrl}
@@ -185,4 +207,4 @@ export const Feed: React.FC<FeedProps> = ({
       ))}
     </div>
   );
-};
+});
