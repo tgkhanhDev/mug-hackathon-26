@@ -107,6 +107,24 @@ class Settings(BaseSettings):
         description="Use SSL/HTTPS when connecting to MinIO"
     )
 
+    # ── Kafka ──────────────────────────────────────────────────
+    KAFKA_BOOTSTRAP_SERVERS: str = Field(
+        default="localhost:9092",
+        description="Kafka bootstrap servers (comma-separated)",
+    )
+    KAFKA_BEHAVIOR_LOG_TOPIC: str = Field(
+        default="behavior_logs",
+        description="Kafka topic for behavior log messages",
+    )
+    KAFKA_BEHAVIOR_LOG_DLQ_TOPIC: str = Field(
+        default="behavior_logs_dlq",
+        description="Dead-letter topic for failed behavior log messages",
+    )
+    KAFKA_CONSUMER_GROUP: str = Field(
+        default="behavior_log_worker",
+        description="Kafka consumer group ID for the behavior log worker",
+    )
+
     # ── Pexels Crawler ─────────────────────────────────────────
     PEXELS_API_KEY: str = Field(
         default="",

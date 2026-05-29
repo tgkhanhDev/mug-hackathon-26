@@ -15,6 +15,7 @@ import asyncio
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+from app.kafka.kafka_client import send_behavior_log
 
 from app.models.behavior_log import BehaviorLogCreate, BehaviorLogInDB, BehaviorLogResponse
 from app.models.feed_session import FeedSessionCreate, FeedSessionInDB, FeedSessionResponse
@@ -301,18 +302,31 @@ class InteractionService:
     async def record_behavior_log(self, data: BehaviorLogCreate) -> BehaviorLogResponse:
         """
         Record raw behavior for a single video view.
-        Non-blocking: Immediately returns 201 Created and pushes DB insert to background.
+        Non-blocking: Immediately returns 201 Created and pushes message to
+        Kafka for background processing by the consumer worker.
         """
         now = datetime.utcnow()
         log_id = str(ObjectId())
 
         # ✅ FIX RACE CONDITION: Write seen_id to Redis BEFORE returning 201
         # This ensures GET /feed sees this video_id immediately (~1ms),
-        # even though the MongoDB insert happens asynchronously in the background.
+        # even though the MongoDB insert happens asynchronously via Kafka consumer.
         await add_seen_video(data.session_id, data.video_id)
 
-        # Fire and forget the actual insertion and metric updates
-        asyncio.create_task(self._process_behavior_log_background(data, log_id, now))
+        # Produce message to Kafka (fire-and-forget via asyncio.create_task)
+
+        kafka_message = {
+            "log_id": log_id,
+            "user_id": data.user_id,
+            "session_id": data.session_id,
+            "video_id": data.video_id,
+            "timestamp": now.isoformat(),
+            "swipe_speed": data.swipe_speed,
+            "watch_duration": data.watch_duration,
+            "is_interaction": data.is_interaction,
+            "topic": data.topic,
+        }
+        asyncio.create_task(send_behavior_log(kafka_message))
 
         # Return immediately to client to prevent blocking
         return BehaviorLogResponse(
@@ -325,7 +339,7 @@ class InteractionService:
             watch_duration=data.watch_duration,
             is_interaction=data.is_interaction,
             topic=data.topic,
-            consecutive_same_topic=0,  # Computed in background, return default for speed
+            consecutive_same_topic=0,  # Computed by Kafka consumer, return default for speed
         )
 
     async def _process_behavior_log_background(self, data: BehaviorLogCreate, log_id: str, now: datetime) -> None:
