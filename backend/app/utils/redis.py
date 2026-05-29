@@ -51,9 +51,11 @@ async def disconnect_redis() -> None:
 
 def get_redis() -> Redis:
     """Get the Redis client instance. Raises if not connected."""
-    if redis_client is None:
+    from app.repositories.redis_client import get_redis as get_repo_redis
+    r = get_repo_redis()
+    if r is None:
         raise RuntimeError("Redis client not initialized. Call connect_redis() first.")
-    return redis_client
+    return r
 
 
 # ══════════════════════════════════════════════════════════════

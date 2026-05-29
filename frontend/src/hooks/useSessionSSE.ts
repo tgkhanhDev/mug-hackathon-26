@@ -13,7 +13,7 @@
  * If not available, an alert is shown (per spec for hackathon — no fallback).
  */
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
 export interface SessionSSEPayload {
   fatigue_score: number;
@@ -24,6 +24,14 @@ export function useSessionSSE(
   sessionId: string | null,
   onMessage: (data: SessionSSEPayload) => void
 ) {
+  // Use a mutable ref to store the latest callback.
+  // This avoids stale closures without having to teardown and recreate the EventSource connection.
+  const onMessageRef = useRef(onMessage);
+
+  useEffect(() => {
+    onMessageRef.current = onMessage;
+  }); // Runs on every render to ensure the ref has the latest callback with correct closure variables
+
   useEffect(() => {
     if (!sessionId) return;
 
@@ -43,7 +51,7 @@ export function useSessionSSE(
     es.onmessage = (e: MessageEvent) => {
       try {
         const payload: SessionSSEPayload = JSON.parse(e.data);
-        onMessage(payload);
+        onMessageRef.current(payload);
       } catch (err) {
         console.error('[SSE] JSON parse error:', err);
       }
@@ -58,8 +66,5 @@ export function useSessionSSE(
       es.close();
       console.log(`[SSE] Disconnected from session stream: ${sessionId}`);
     };
-    // onMessage is intentionally not in deps — callers must wrap it in useCallback
-    // to prevent tearing down/recreating the SSE connection on every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 }

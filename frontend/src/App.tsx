@@ -216,7 +216,7 @@ function App() {
     setFatigueScore(newScore);
 
     // --- Stage 1: Cảnh báo lần đầu khi fatigue >= 30% ---
-    if (newScore >= 30 && !stage1ShownRef.current && !touchGrassWarnedRef.current) {
+    if (newScore >= 50 && !stage1ShownRef.current && !touchGrassWarnedRef.current) {
       stage1ShownRef.current = true;
       setTouchGrassStage(1);
       setShowTouchGrassModal(true);
