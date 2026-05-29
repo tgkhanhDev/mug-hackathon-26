@@ -389,7 +389,7 @@ export const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(({
           )}
 
           {/* Right Sidebar Actions */}
-          <div className="absolute right-4 bottom-24 flex flex-col items-center gap-6 z-10">
+          <div className="absolute right-4 bottom-28 flex flex-col items-center gap-6 z-10">
             <div className="w-12 h-12 rounded-full bg-white/20 border border-white/50 flex items-center justify-center overflow-hidden mb-2">
               <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`} alt="avatar" className="w-full h-full object-cover" />
             </div>
@@ -427,8 +427,8 @@ export const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(({
             </div>
           </div>
 
-          {/* Bottom Info */}
-          <div className="absolute bottom-4 left-4 right-20 z-10">
+          {/* Bottom Info — offset by BottomNav height (64px ≈ bottom-20) */}
+          <div className="absolute bottom-20 left-4 right-20 z-10">
             <h3 className="text-white font-semibold text-lg mb-1">@{username}</h3>
             <p className="text-white text-sm line-clamp-2 mb-3">
               {description}

@@ -25,6 +25,7 @@ interface FeedProps {
   onLoadMore?: () => void;
   swipeTrigger?: { direction: 'up' | 'down'; speed: 'slow' | 'fast'; timestamp: number } | null;
   onVideoActivated?: (videoId: string) => void;
+  onActiveIndexChange?: (index: number) => void;
 }
 
 export const Feed = forwardRef<FeedHandle, FeedProps>(({
@@ -33,7 +34,8 @@ export const Feed = forwardRef<FeedHandle, FeedProps>(({
   sessionId,
   onLoadMore,
   swipeTrigger,
-  onVideoActivated
+  onVideoActivated,
+  onActiveIndexChange
 }, ref) => {
   const cardRefsMap = useRef<Map<string, VideoCardHandle>>(new Map());
 
@@ -163,6 +165,7 @@ export const Feed = forwardRef<FeedHandle, FeedProps>(({
         }
       }
       setActiveIndex(candidateIndex);
+      onActiveIndexChange?.(candidateIndex);
     }
   };
 

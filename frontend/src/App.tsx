@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { connectSessionWS, disconnectSessionWS } from './hooks/useVideoStats';
 import { useSessionSSE } from './hooks/useSessionSSE';
 import { Feed } from './components/Feed';
@@ -213,8 +213,18 @@ function App() {
     comments: v.comment_count,
     shares: 0,
     bookmarks: 0,
-    tags: v.tags
+    tags: v.tags,
+    category: v.category || 'general'
   })) : [];
+
+  // Track which video is currently active (index from Feed)
+  const [currentActiveIndex, setCurrentActiveIndex] = useState(0);
+  const currentCategory = useMemo(() => {
+    if (feedVideos.length > 0 && currentActiveIndex < feedVideos.length) {
+      return feedVideos[currentActiveIndex].category;
+    }
+    return 'general';
+  }, [currentActiveIndex, feedVideos]);
 
   // ── SSE: receive real-time fatigue updates (replaces 3s polling) ──────────
   const handleSSEMessage = useCallback(({ fatigue_score, adaptive_state }: { fatigue_score: number; adaptive_state: string }) => {
@@ -562,25 +572,7 @@ function App() {
             </div>
           </div>
 
-          {/* Demo Simulator Control Hub (Floating sidebar for Pitching/Demo presentation) */}
-          <div className="absolute left-4 bottom-24 z-40 flex flex-col gap-2 pointer-events-auto">
-            <button
-              onClick={simulateDoomscroll}
-              className="px-3 py-1.5 bg-zinc-900/90 hover:bg-zinc-800 text-rose-300 border border-rose-500/30 rounded-xl text-[10px] font-semibold flex items-center gap-1 transition-all shadow-md active:scale-95"
-              title="Mô phỏng hành vi vuốt nhanh và liên tục để kích hoạt cảnh báo"
-            >
-              <ShieldAlert size={12} />
-              Lướt Vô Thức (+15%)
-            </button>
 
-            <button
-              onClick={resetSession}
-              className="px-3 py-1.5 bg-zinc-900/90 hover:bg-zinc-800 text-emerald-300 border border-emerald-500/30 rounded-xl text-[10px] font-semibold flex items-center gap-1 transition-all shadow-md active:scale-95"
-            >
-              <Leaf size={12} />
-              Reset Trạng Thái
-            </button>
-          </div>
 
           {/* Adaptive Rerank/Mindful Injection Banner Alert */}
           {isMindfulActive && (
@@ -601,6 +593,7 @@ function App() {
               sessionId={sessionId}
               swipeTrigger={swipeTrigger}
               onVideoActivated={handleVideoActivated}
+              onActiveIndexChange={setCurrentActiveIndex}
               onLoadMore={() => {
                 // Fix 2B: Stop fetching when no more content available
                 if (hasFetchedNextBatch.current || !hasMoreContent) return;
@@ -654,8 +647,7 @@ function App() {
             sessionVideoCount={localVideoCount}
             adaptiveState={adaptiveState}
             intensityCounts={intensityCounts}
-            onSimulateDoomscroll={simulateDoomscroll}
-            onResetSession={resetSession}
+            currentCategory={currentCategory}
             onTriggerSwipe={triggerSwipe}
           />
         </div>
