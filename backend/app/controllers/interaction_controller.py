@@ -10,14 +10,17 @@ Interaction controller — API routes for:
 Thin layer: validates request → calls service → returns response.
 """
 
+import json
 import logging
 
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, Query, Request, WebSocket, WebSocketDisconnect, status
+from fastapi.responses import StreamingResponse
 
 from app.models.behavior_log import BehaviorLogCreate, BehaviorLogResponse
 from app.models.feed_session import FeedSessionCreate, FeedSessionResponse
 from app.models.interaction import InteractionCreate, InteractionResponse
 from app.services.interaction_service import InteractionService
+from app.utils.redis import subscribe_session_events
 from app.utils.websocket_manager import ws_manager
 
 logger = logging.getLogger(__name__)
@@ -88,6 +91,35 @@ async def end_session(session_id: str):
     """PUT /api/v1/sessions/{session_id}/end — End a session."""
     service = InteractionService()
     return await service.end_session(session_id)
+
+
+@router.get(
+    "/sessions/{session_id}/events",
+    summary="Stream session events via SSE",
+    description=(
+        "Server-Sent Events endpoint that pushes real-time fatigue_score and "
+        "adaptive_state updates whenever the backend recalculates session metrics. "
+        "No authentication required (hackathon/demo). "
+        "The stream stays open; the client must close the connection when done."
+    ),
+)
+async def session_events_sse(session_id: str, request: Request):
+    """GET /api/v1/sessions/{session_id}/events — Real-time SSE session stream."""
+
+    async def event_generator():
+        async for payload in subscribe_session_events(session_id):
+            if await request.is_disconnected():
+                break
+            yield f"data: {json.dumps(payload)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",    # Disable nginx buffering
+        },
+    )
 
 
 # ══════════════════════════════════════════════════════════════════

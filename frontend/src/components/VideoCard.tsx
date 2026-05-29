@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect, useContext, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { Heart, MessageCircle, Bookmark, Share2, Music } from 'lucide-react';
+import Hls from 'hls.js';
 import { useInView } from 'react-intersection-observer';
 import { useVideoStats } from '../hooks/useVideoStats';
 import { sendInteraction, sendBehaviorLog } from '../api/client';
@@ -25,7 +26,6 @@ interface VideoCardProps {
   topic: string;
   userId: string | null;
   sessionId: string | null;
-  onRefreshSessionStats: (activeSessionId?: string | null) => Promise<void>;
   swipeSpeed: number;
   onVideoActivated?: (videoId: string) => void;
 }
@@ -50,7 +50,6 @@ export const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(({
   topic,
   userId,
   sessionId,
-  onRefreshSessionStats,
   swipeSpeed,
   onVideoActivated
 }, ref) => {
@@ -59,6 +58,7 @@ export const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(({
   const { ref: inViewRef } = useInView({ threshold: 0.7 });
   const { isAuthenticated, openAuthModal } = useContext(AuthContext);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLiked, setIsLiked] = useState(false);
   const [hasCommented, setHasCommented] = useState(false);
@@ -143,6 +143,42 @@ export const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(({
   }));
 
   useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const isHls = videoUrl.includes('.m3u8');
+
+    // Initialize source if in window
+    if (isInWindow) {
+      if (isHls) {
+        if (video.canPlayType('application/vnd.apple.mpegurl')) {
+          // Native Safari HLS
+          if (video.src !== videoUrl) {
+            video.src = videoUrl;
+          }
+        } else if (Hls.isSupported()) {
+          // HLS.js
+          if (!hlsRef.current) {
+            // Tối ưu hoá hls.js cho infinite scroll (Feed):
+            // - Tắt web worker để tránh overhead tạo/huỷ worker liên tục khi scroll
+            // - Giới hạn buffer tải trước (tránh tải quá nhiều chunk m4s rác khi lướt qua)
+            hlsRef.current = new Hls({
+              enableWorker: false,
+              maxBufferLength: 10,
+              maxMaxBufferLength: 20
+            });
+            hlsRef.current.loadSource(videoUrl);
+            hlsRef.current.attachMedia(video);
+          }
+        }
+      } else {
+        // Non-HLS (e.g. MP4)
+        if (video.src !== videoUrl) {
+          video.src = videoUrl;
+        }
+      }
+    }
+
     if (isActive && isInWindow) {
       // Fire once per unique video activation so parent can count unique views
       onVideoActivated?.(videoId);
@@ -150,7 +186,7 @@ export const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(({
       setIsPlaying(true);
       activeStartTimeRef.current = Date.now();
       activeSessionIdRef.current = sessionId; // Capture the session ID when playback starts
-      const playPromise = videoRef.current?.play();
+      const playPromise = video.play();
       if (playPromise !== undefined) {
         playPromise.catch((error) => {
           console.warn("Autoplay was prevented by browser policy:", error);
@@ -158,21 +194,60 @@ export const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(({
         });
       }
     } else if (!isActive) {
-      videoRef.current?.pause();
-      if (videoRef.current) {
-        videoRef.current.currentTime = 0;
-      }
+      video.pause();
+      video.currentTime = 0;
       setIsPlaying(false);
     }
 
     return () => {
       // Cleanup runs when card becomes inactive or unmounts
-      flushBehaviorLog();
+      if (activeStartTimeRef.current !== null) {
+        const duration = (Date.now() - activeStartTimeRef.current) / 1000;
+        activeStartTimeRef.current = null;
+
+        const params = logParamsRef.current;
+        // Only send behavior log if the video started playing under a valid session and that session is still the active one
+        if (params.userId && params.sessionId && activeSessionIdRef.current === params.sessionId) {
+          const wasInteracted = params.isLiked || params.hasCommented || replayCountRef.current > 0;
+
+          sendBehaviorLog(
+            params.videoId,
+            params.topic,
+            params.userId,
+            params.sessionId,
+            params.swipeSpeed,
+            duration,
+            wasInteracted
+          );
+        }
+      }
     };
     // isInWindow ensures effect re-runs when video element transitions from
     // placeholder <div> → real <video> while card is already active
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isActive, isInWindow]);
+  }, [isActive, isInWindow, videoUrl, videoId, sessionId, onVideoActivated]);
+
+  // Clean up Hls when unmounting or changing url/window state
+  useEffect(() => {
+    return () => {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+    };
+  }, [isInWindow, videoUrl]);
+
+  // Fix 3A + Bug 1: Aggressive GPU/network cleanup when card exits the viewport window.
+  // Proactively stops playback and releases GPU decoder/texture before React unmounts <video>,
+  // preventing NS_BINDING_ABORTED errors and GPU/VRAM accumulation during long scroll sessions.
+  useEffect(() => {
+    if (!isInWindow && videoRef.current) {
+      const video = videoRef.current;
+      video.pause();
+      video.removeAttribute('src');
+      video.load(); // Force browser to release GPU decoder + texture cache
+      video.preload = 'none';
+    }
+  }, [isInWindow]);
 
   const handleLike = async () => {
     if (!isAuthenticated) {
@@ -284,7 +359,6 @@ export const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(({
         // ── Real video element — only rendered for cards within ±WINDOW_SIZE of active ──
         <video
           ref={setRefs}
-          src={videoUrl}
           className="w-full h-full object-cover"
           muted={false}
           onClick={togglePlay}
@@ -315,7 +389,7 @@ export const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(({
           )}
 
           {/* Right Sidebar Actions */}
-          <div className="absolute right-4 bottom-24 flex flex-col items-center gap-6 z-10">
+          <div className="absolute right-4 bottom-28 flex flex-col items-center gap-6 z-10">
             <div className="w-12 h-12 rounded-full bg-white/20 border border-white/50 flex items-center justify-center overflow-hidden mb-2">
               <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`} alt="avatar" className="w-full h-full object-cover" />
             </div>
@@ -353,8 +427,8 @@ export const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(({
             </div>
           </div>
 
-          {/* Bottom Info */}
-          <div className="absolute bottom-4 left-4 right-20 z-10">
+          {/* Bottom Info — offset by BottomNav height (64px ≈ bottom-20) */}
+          <div className="absolute bottom-20 left-4 right-20 z-10">
             <h3 className="text-white font-semibold text-lg mb-1">@{username}</h3>
             <p className="text-white text-sm line-clamp-2 mb-3">
               {description}

@@ -22,20 +22,20 @@ interface FeedProps {
   videos: VideoData[];
   userId: string | null;
   sessionId: string | null;
-  onRefreshSessionStats: (activeSessionId?: string | null) => Promise<void>;
   onLoadMore?: () => void;
   swipeTrigger?: { direction: 'up' | 'down'; speed: 'slow' | 'fast'; timestamp: number } | null;
   onVideoActivated?: (videoId: string) => void;
+  onActiveIndexChange?: (index: number) => void;
 }
 
 export const Feed = forwardRef<FeedHandle, FeedProps>(({
   videos,
   userId,
   sessionId,
-  onRefreshSessionStats,
   onLoadMore,
   swipeTrigger,
-  onVideoActivated
+  onVideoActivated,
+  onActiveIndexChange
 }, ref) => {
   const cardRefsMap = useRef<Map<string, VideoCardHandle>>(new Map());
 
@@ -165,6 +165,7 @@ export const Feed = forwardRef<FeedHandle, FeedProps>(({
         }
       }
       setActiveIndex(candidateIndex);
+      onActiveIndexChange?.(candidateIndex);
     }
   };
 
@@ -200,7 +201,6 @@ export const Feed = forwardRef<FeedHandle, FeedProps>(({
           topic={video.tags && video.tags.length > 0 ? video.tags[0] : 'general'}
           userId={userId}
           sessionId={sessionId}
-          onRefreshSessionStats={onRefreshSessionStats}
           swipeSpeed={swipeSpeed}
           onVideoActivated={onVideoActivated}
         />

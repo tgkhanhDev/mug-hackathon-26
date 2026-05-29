@@ -1,9 +1,13 @@
 """
 Redis connection manager.
 Provides an asynchronous client using redis.asyncio.
+Also exposes Pub/Sub helpers for SSE-based session event streaming.
 """
 
+import asyncio
+import json
 import logging
+from typing import AsyncGenerator
 from redis.asyncio import Redis
 from app.config import settings
 
@@ -47,6 +51,70 @@ async def disconnect_redis() -> None:
 
 def get_redis() -> Redis:
     """Get the Redis client instance. Raises if not connected."""
-    if redis_client is None:
+    from app.repositories.redis_client import get_redis as get_repo_redis
+    r = get_repo_redis()
+    if r is None:
         raise RuntimeError("Redis client not initialized. Call connect_redis() first.")
-    return redis_client
+    return r
+
+
+# ══════════════════════════════════════════════════════════════
+# Redis Pub/Sub — SSE session event streaming
+# ══════════════════════════════════════════════════════════════
+
+def _session_event_channel(session_id: str) -> str:
+    """Build the Redis Pub/Sub channel name for a session."""
+    return f"session:{session_id}:events"
+
+
+async def publish_session_update(
+    session_id: str, fatigue_score: float, adaptive_state: str
+) -> None:
+    """
+    Publish a session fatigue update to the session's Redis Pub/Sub channel.
+    Called by the interaction service after every fatigue recalculation.
+    """
+    try:
+        r = get_redis()
+    except RuntimeError:
+        return  # Redis not initialised — skip gracefully
+
+    payload = json.dumps({"fatigue_score": fatigue_score, "adaptive_state": adaptive_state})
+    try:
+        await r.publish(_session_event_channel(session_id), payload)
+    except Exception as exc:
+        logger.warning(f"Redis publish failed for session={session_id}: {exc}")
+
+
+async def subscribe_session_events(
+    session_id: str,
+) -> AsyncGenerator[dict, None]:
+    """
+    Async generator that subscribes to the session's Redis Pub/Sub channel
+    and yields parsed payloads until the caller stops iterating.
+    """
+    try:
+        r = get_redis()
+    except RuntimeError:
+        return  # Redis not initialised — yield nothing
+
+    pubsub = r.pubsub()
+    channel = _session_event_channel(session_id)
+    await pubsub.subscribe(channel)
+    try:
+        while True:
+            message = await pubsub.get_message(
+                ignore_subscribe_messages=True, timeout=1.0
+            )
+            if message and message.get("data"):
+                try:
+                    yield json.loads(message["data"])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            else:
+                await asyncio.sleep(0.1)
+    finally:
+        try:
+            await pubsub.unsubscribe(channel)
+        except Exception:
+            pass

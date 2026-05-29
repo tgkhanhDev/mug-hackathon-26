@@ -1,5 +1,5 @@
 import React from 'react';
-import { Brain, Play, ShieldAlert, Zap, ChevronUp, ChevronDown, Activity } from 'lucide-react';
+import { Brain, Play, ShieldAlert, Tag, Zap, ChevronUp, ChevronDown, Activity } from 'lucide-react';
 
 interface AnalyticsDashboardProps {
   fatigueScore: number;
@@ -7,8 +7,7 @@ interface AnalyticsDashboardProps {
   sessionVideoCount: number;
   adaptiveState: 'normal' | 'warning' | 'exhausted';
   intensityCounts: Record<string, number>;
-  onSimulateDoomscroll: () => void;
-  onResetSession: () => void;
+  currentCategory: string;
   onTriggerSwipe: (dir: 'up' | 'down', speed: 'slow' | 'fast') => void;
 }
 
@@ -18,8 +17,7 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
   sessionVideoCount,
   adaptiveState,
   intensityCounts,
-  onSimulateDoomscroll,
-  onResetSession,
+  currentCategory,
   onTriggerSwipe
 }) => {
   const highCount = intensityCounts['high'] || 0;
@@ -41,9 +39,15 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
     <div className="flex flex-col gap-5 bg-zinc-900/90 border border-zinc-800/80 rounded-[32px] p-5 w-[320px] text-white shadow-2xl backdrop-blur-md max-h-[852px] overflow-y-auto custom-scrollbar">
 
       {/* Header */}
-      <div className="flex items-center gap-2 text-emerald-400 mb-2">
-        <Activity size={20} className="animate-pulse" />
-        <h3 className="font-bold text-[13px] uppercase tracking-wider font-mono">Live Analytics</h3>
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2 text-emerald-400">
+          <Activity size={20} className="animate-pulse" />
+          <h3 className="font-bold text-[13px] uppercase tracking-wider font-mono">Live Analytics</h3>
+        </div>
+        <div className="flex items-center gap-1.5 px-2.5 py-1 bg-cyan-500/10 border border-cyan-500/30 rounded-lg">
+          <Tag size={12} className="text-cyan-400" />
+          <span className="text-[10px] font-semibold text-cyan-300 capitalize font-mono">{currentCategory}</span>
+        </div>
       </div>
 
       {/* Section 1: Status Cards */}
@@ -147,21 +151,6 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
       {/* Section 5: Demo Controls */}
       <div className="flex flex-col gap-3">
         <span className="text-[10px] text-zinc-400 uppercase tracking-widest font-mono font-bold">Demo Controls</span>
-
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            onClick={onSimulateDoomscroll}
-            className="py-2 px-3 bg-rose-500/10 hover:bg-rose-500 hover:text-black border border-rose-500/20 text-rose-400 font-semibold rounded-xl flex items-center justify-center gap-1 transition-all text-[10px]"
-          >
-            <ShieldAlert size={12} /> Lướt Vô Thức
-          </button>
-          <button
-            onClick={onResetSession}
-            className="py-2 px-3 bg-emerald-500/10 hover:bg-emerald-500 hover:text-black border border-emerald-500/20 text-emerald-400 font-semibold rounded-xl flex items-center justify-center gap-1 transition-all text-[10px]"
-          >
-            <Activity size={12} /> Reset
-          </button>
-        </div>
 
         <div className="grid grid-cols-2 gap-2 mt-1">
           <div className="flex flex-col gap-2">

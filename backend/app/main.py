@@ -6,6 +6,7 @@ Architecture: N-Layer (Controller → Service → Repository)
 Database: MongoDB Atlas with Vector Search
 """
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -18,6 +19,8 @@ from app.repositories.redis_client import connect_redis, disconnect_redis, is_re
 from app.utils.exceptions import AppException, app_exception_handler
 from app.utils.scheduler import start_scheduler, stop_scheduler
 from app.utils.embedding import is_mock_mode
+from app.kafka.kafka_client import start_producer, stop_producer
+from app.workers.behavior_log_consumer import run_behavior_log_consumer
 
 # ── Controllers ────────────────────────────────────────────────
 from app.controllers import video_controller
@@ -42,14 +45,15 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """
     Application lifespan manager.
-    - Startup: connect to MongoDB, start embedding scheduler
-    - Shutdown: stop scheduler, disconnect MongoDB
+    - Startup: connect to MongoDB, Redis, Kafka; start scheduler & consumer
+    - Shutdown: stop consumer, Kafka, scheduler; disconnect Redis & MongoDB
     """
     # ── Startup ────────────────────────────────────────────
     logger.info("=" * 60)
     logger.info("🌿 GoTouchGrass Backend starting up...")
     logger.info(f"   Database: {settings.DATABASE_NAME}")
     logger.info(f"   Redis: {settings.REDIS_URL}")
+    logger.info(f"   Kafka: {settings.KAFKA_BOOTSTRAP_SERVERS}")
     logger.info(f"   Embedding: {'🎲 MOCK MODE' if is_mock_mode() else '🤖 OpenAI'}")
     logger.info(f"   Port: {settings.PORT}")
     logger.info("=" * 60)
@@ -58,10 +62,29 @@ async def lifespan(app: FastAPI):
     await connect_redis()
     start_scheduler()
 
+    # ── Kafka ──────────────────────────────────────────────
+    try:
+        await start_producer()
+        kafka_consumer_task = asyncio.create_task(run_behavior_log_consumer())
+        logger.info("✅ Kafka producer & consumer background task started")
+    except Exception as exc:
+        kafka_consumer_task = None
+        logger.warning(f"⚠️ Kafka startup failed (app will run without Kafka): {exc}")
+
     yield  # App is running
 
     # ── Shutdown ───────────────────────────────────────────
     logger.info("🛑 GoTouchGrass Backend shutting down...")
+
+    # Cancel Kafka consumer background task
+    if kafka_consumer_task is not None:
+        kafka_consumer_task.cancel()
+        try:
+            await kafka_consumer_task
+        except asyncio.CancelledError:
+            pass
+
+    await stop_producer()
     stop_scheduler()
     await disconnect_redis()
     await disconnect_db()

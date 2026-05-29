@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { connectSessionWS, disconnectSessionWS } from './hooks/useVideoStats';
-import { Feed, type FeedHandle } from './components/Feed';
+import { useSessionSSE } from './hooks/useSessionSSE';
+import { Feed } from './components/Feed';
 import { BottomNav } from './components/BottomNav';
 import { AuthPopup } from './components/AuthPopup';
 import { AuthContext } from './context/AuthContext';
@@ -13,7 +14,6 @@ import {
   usePersonalizedFeed,
   startSession,
   endSession,
-  getSession,
   sendBehaviorLog,
   sendInteraction
 } from './api/client';
@@ -119,13 +119,13 @@ function App() {
   // It is reset inside Feed whenever the videos array grows (new batch arrived).
   const hasFetchedNextBatch = useRef(false);
 
-  // excludeIds: snapshot of video IDs already displayed, set in onLoadMore handler
-  // right before incrementing feedFetchKey. Both state updates are batched by React
-  // into a single render, so SWR sees the correct exclude list + new fetchKey together.
-  const [excludeIds, setExcludeIds] = useState<string[]>([]);
+  // Fix 2B: Track whether there is more content to load from the backend.
+  // Set to false when backend returns fewer videos than BATCH_SIZE.
+  const [hasMoreContent, setHasMoreContent] = useState(true);
 
+  // Fix 2A: excludeIds removed — backend dedup via Redis seen-set.
   // Fetch feed based on auth state
-  const { videos: apiVideos, mutate: mutateFeed } = usePersonalizedFeed(user ? user.id : null, feedLimit, feedFetchKey, excludeIds);
+  const { videos: apiVideos, mutate: mutateFeed } = usePersonalizedFeed(user ? user.id : null, feedLimit, feedFetchKey);
   const { videos: trendingVideos, mutate: mutateTrending } = useTrendingVideos(trendingLimit);
 
   // Select video source
@@ -153,15 +153,27 @@ function App() {
   const isCreatingSessionRef = useRef(false);
 
   useEffect(() => {
-    if (currentVideos && currentVideos.length > 0) {
-      setAccumulatedVideos(prev => {
-        const newVids = currentVideos.filter(cv => !prev.find(p => p.id === cv.id));
-        if (newVids.length > 0) {
-          // New batch arrived → reset the guard so the next batch can be fetched
-          hasFetchedNextBatch.current = false;
-        }
-        return newVids.length > 0 ? [...prev, ...newVids] : prev;
-      });
+    if (currentVideos) {
+      if (currentVideos.length > 0) {
+        setAccumulatedVideos(prev => {
+          const newVids = currentVideos.filter(cv => !prev.find(p => p.id === cv.id));
+          if (newVids.length > 0) {
+            // New batch arrived → reset the guard so the next batch can be fetched
+            hasFetchedNextBatch.current = false;
+          }
+
+          // Fix 2B: Detect end-of-content — if backend returned fewer than BATCH_SIZE,
+          // there are no more videos to load.
+          if (currentVideos.length < BATCH_SIZE) {
+            setHasMoreContent(false);
+          }
+
+          return newVids.length > 0 ? [...prev, ...newVids] : prev;
+        });
+      } else {
+        // Backend returned empty array → definitely no more content
+        setHasMoreContent(false);
+      }
     }
   }, [currentVideos]);
 
@@ -201,55 +213,61 @@ function App() {
     comments: v.comment_count,
     shares: 0,
     bookmarks: 0,
-    tags: v.tags
+    tags: v.tags,
+    category: v.category || 'general'
   })) : [];
 
-  const refreshSessionStats = async (activeSessionId?: string | null) => {
-    const sid = activeSessionId !== undefined ? activeSessionId : sessionId;
-    if (!sid) return;
-    try {
-      const sessionData = await getSession(sid);
-      const newScore = Math.round(sessionData.fatigue_score);
-      const newAdaptiveState = sessionData.adaptive_state;
-      const isExhaustedOrWarning = newAdaptiveState === 'warning' || newAdaptiveState === 'exhausted' || newAdaptiveState === 'critical';
-
-
-
-      setAdaptiveState(newAdaptiveState as 'normal' | 'warning' | 'exhausted' | 'critical');
-      setFatigueScore(newScore);
-
-      // --- Stage 1: Cảnh báo lần đầu khi fatigue >= 30% ---
-      if (newScore >= 30 && !stage1ShownRef.current && !touchGrassWarnedRef.current) {
-        stage1ShownRef.current = true;
-        setTouchGrassStage(1);
-        setShowTouchGrassModal(true);
-      }
-
-      // --- Stage 2: Force quit nếu user đã bỏ qua cảnh báo + xem thêm 3 video ---
-      if (
-        touchGrassWarnedRef.current &&
-        localVideoCountRef.current - videoCountAtWarningRef.current >= 3
-      ) {
-        touchGrassWarnedRef.current = false;  // prevent re-trigger
-        setTouchGrassStage(2);
-        setShowTouchGrassModal(true);
-      }
-
-      // Only trigger feed refetch when mindful state ACTUALLY changes,
-      // AND not on the very first load (SWR already fetched automatically)
-      if (isExhaustedOrWarning !== isMindfulActive && hasInitialFeedFetched.current) {
-        setIsMindfulActive(isExhaustedOrWarning);
-        if (user) {
-          mutateFeed();
-        }
-      } else {
-        setIsMindfulActive(isExhaustedOrWarning);
-      }
-      hasInitialFeedFetched.current = true;
-    } catch (error) {
-      console.error('Error fetching session stats:', error);
+  // Track which video is currently active (index from Feed)
+  const [currentActiveIndex, setCurrentActiveIndex] = useState(0);
+  const currentCategory = useMemo(() => {
+    if (feedVideos.length > 0 && currentActiveIndex < feedVideos.length) {
+      return feedVideos[currentActiveIndex].category;
     }
-  };
+    return 'general';
+  }, [currentActiveIndex, feedVideos]);
+
+  // ── SSE: receive real-time fatigue updates (replaces 3s polling) ──────────
+  const handleSSEMessage = useCallback(({ fatigue_score, adaptive_state }: { fatigue_score: number; adaptive_state: string }) => {
+    const newScore = Math.round(fatigue_score);
+    const isExhaustedOrWarning =
+      adaptive_state === 'warning' ||
+      adaptive_state === 'exhausted' ||
+      adaptive_state === 'critical';
+
+    setAdaptiveState(adaptive_state as 'normal' | 'warning' | 'exhausted' | 'critical');
+    setFatigueScore(newScore);
+
+    // --- Stage 1: Cảnh báo lần đầu khi fatigue >= 30% ---
+    if (newScore >= 50 && !stage1ShownRef.current && !touchGrassWarnedRef.current) {
+      stage1ShownRef.current = true;
+      setTouchGrassStage(1);
+      setShowTouchGrassModal(true);
+    }
+
+    // --- Stage 2: Force quit nếu user đã bỏ qua cảnh báo + xem thêm 3 video ---
+    if (
+      touchGrassWarnedRef.current &&
+      localVideoCountRef.current - videoCountAtWarningRef.current >= 3
+    ) {
+      touchGrassWarnedRef.current = false;
+      setTouchGrassStage(2);
+      setShowTouchGrassModal(true);
+    }
+
+    // Only trigger feed refetch when mindful state ACTUALLY changes,
+    // AND not on the very first load (SWR already fetched automatically)
+    if (isExhaustedOrWarning !== isMindfulActive && hasInitialFeedFetched.current) {
+      setIsMindfulActive(isExhaustedOrWarning);
+      if (user) {
+        mutateFeed();
+      }
+    } else {
+      setIsMindfulActive(isExhaustedOrWarning);
+    }
+    hasInitialFeedFetched.current = true;
+  }, [isMindfulActive, user, mutateFeed]);
+
+  useSessionSSE(sessionId, handleSSEMessage);
 
   // Track fatigue thresholds for sparkline and future event log re-enablement
   useEffect(() => {
@@ -280,7 +298,7 @@ function App() {
           setSessionId(session.id);
           localStorage.setItem('session_id', session.id);
           connectSessionWS(session.id);
-          refreshSessionStats(session.id);
+          // SSE will push the initial state once connected — no manual fetch needed
         })
         .catch(console.error)
         .finally(() => {
@@ -289,7 +307,7 @@ function App() {
         });
     } else if (sessionId) {
       connectSessionWS(sessionId);
-      refreshSessionStats(sessionId);
+      // SSE stream starts automatically via useSessionSSE hook
     }
   }, [user]);
 
@@ -297,7 +315,7 @@ function App() {
   useEffect(() => {
     // Reset feed/video states
     setAccumulatedVideos([]);
-    setExcludeIds([]); // clear exclude list for fresh user
+    setHasMoreContent(true); // reset end-of-content flag for fresh user
     setFeedFetchKey(0); // reset fetch key so new user starts from batch 0
     // feedLimit is constant (BATCH_SIZE), no need to reset it
     setTrendingLimit(BATCH_SIZE);
@@ -381,9 +399,7 @@ function App() {
         0.5,
         950.0
       );
-      setTimeout(() => {
-        refreshSessionStats();
-      }, 500);
+      // SSE will push the updated fatigue score automatically — no setTimeout needed
     } else {
       // Fallback simulation when logged out
       setFatigueScore(prev => {
@@ -418,7 +434,7 @@ function App() {
         stage1ShownRef.current = false;
         localVideoCountRef.current = 0;
         setAccumulatedVideos([]);
-        setExcludeIds([]); // clear exclude list for fresh session
+        setHasMoreContent(true); // reset end-of-content flag for fresh session
         // Reset fetch key to 1 → new SWR cache key → forces fresh fetch for new session
         setFeedFetchKey(1);
       } catch (error) {
@@ -556,25 +572,7 @@ function App() {
             </div>
           </div>
 
-          {/* Demo Simulator Control Hub (Floating sidebar for Pitching/Demo presentation) */}
-          <div className="absolute left-4 bottom-24 z-40 flex flex-col gap-2 pointer-events-auto">
-            <button
-              onClick={simulateDoomscroll}
-              className="px-3 py-1.5 bg-zinc-900/90 hover:bg-zinc-800 text-rose-300 border border-rose-500/30 rounded-xl text-[10px] font-semibold flex items-center gap-1 transition-all shadow-md active:scale-95"
-              title="Mô phỏng hành vi vuốt nhanh và liên tục để kích hoạt cảnh báo"
-            >
-              <ShieldAlert size={12} />
-              Lướt Vô Thức (+15%)
-            </button>
 
-            <button
-              onClick={resetSession}
-              className="px-3 py-1.5 bg-zinc-900/90 hover:bg-zinc-800 text-emerald-300 border border-emerald-500/30 rounded-xl text-[10px] font-semibold flex items-center gap-1 transition-all shadow-md active:scale-95"
-            >
-              <Leaf size={12} />
-              Reset Trạng Thái
-            </button>
-          </div>
 
           {/* Adaptive Rerank/Mindful Injection Banner Alert */}
           {isMindfulActive && (
@@ -593,16 +591,16 @@ function App() {
               videos={feedVideos}
               userId={user ? user.id : null}
               sessionId={sessionId}
-              onRefreshSessionStats={refreshSessionStats}
               swipeTrigger={swipeTrigger}
               onVideoActivated={handleVideoActivated}
+              onActiveIndexChange={setCurrentActiveIndex}
               onLoadMore={() => {
-                if (hasFetchedNextBatch.current) return; // guard: already triggered for this batch
+                // Fix 2B: Stop fetching when no more content available
+                if (hasFetchedNextBatch.current || !hasMoreContent) return;
                 hasFetchedNextBatch.current = true;
                 if (user) {
-                  // Snapshot current accumulated IDs → backend will exclude these
-                  // React 18 batches both setState calls into one render.
-                  setExcludeIds(accumulatedVideos.map((v: any) => v.id));
+                  // Fix 2A: No excludeIds — backend dedup via Redis seen-set.
+                  // Just bump fetchKey to force SWR to make a new request.
                   setFeedFetchKey(prev => prev + 1);
                 } else {
                   // Trending: increase limit so backend returns more results
@@ -649,8 +647,7 @@ function App() {
             sessionVideoCount={localVideoCount}
             adaptiveState={adaptiveState}
             intensityCounts={intensityCounts}
-            onSimulateDoomscroll={simulateDoomscroll}
-            onResetSession={resetSession}
+            currentCategory={currentCategory}
             onTriggerSwipe={triggerSwipe}
           />
         </div>
