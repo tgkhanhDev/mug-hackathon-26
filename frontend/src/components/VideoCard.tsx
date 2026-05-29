@@ -236,6 +236,19 @@ export const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(({
     };
   }, [isInWindow, videoUrl]);
 
+  // Fix 3A + Bug 1: Aggressive GPU/network cleanup when card exits the viewport window.
+  // Proactively stops playback and releases GPU decoder/texture before React unmounts <video>,
+  // preventing NS_BINDING_ABORTED errors and GPU/VRAM accumulation during long scroll sessions.
+  useEffect(() => {
+    if (!isInWindow && videoRef.current) {
+      const video = videoRef.current;
+      video.pause();
+      video.removeAttribute('src');
+      video.load(); // Force browser to release GPU decoder + texture cache
+      video.preload = 'none';
+    }
+  }, [isInWindow]);
+
   const handleLike = async () => {
     if (!isAuthenticated) {
       openAuthModal();

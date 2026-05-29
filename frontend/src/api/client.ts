@@ -60,11 +60,11 @@ export function useTrendingVideos(limit: number = 10) {
   };
 }
 
-export function usePersonalizedFeed(userId: string | null, limit: number = 10, fetchKey: number = 0, excludeIds: string[] = []) {
-  // Build URL with exclude param so backend can dedup server-side
-  const excludeParam = excludeIds.length > 0 ? `&exclude=${excludeIds.join(',')}` : '';
+export function usePersonalizedFeed(userId: string | null, limit: number = 10, fetchKey: number = 0) {
+  // Fix 2A: exclude IDs removed from URL — backend dedup via Redis seen-set handles
+  // deduplication server-side. This prevents URL truncation when 240+ IDs are sent.
   const { data, error, isLoading, mutate } = useSWR<VideoResponse[]>(
-    userId ? `${API_URL}/feed/${userId}?limit=${limit}${excludeParam}&_k=${fetchKey}` : null,
+    userId ? `${API_URL}/feed/${userId}?limit=${limit}&_k=${fetchKey}` : null,
     fetcher,
     { revalidateOnFocus: false, revalidateOnReconnect: false }
   );

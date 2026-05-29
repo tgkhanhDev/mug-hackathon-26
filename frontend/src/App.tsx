@@ -119,13 +119,13 @@ function App() {
   // It is reset inside Feed whenever the videos array grows (new batch arrived).
   const hasFetchedNextBatch = useRef(false);
 
-  // excludeIds: snapshot of video IDs already displayed, set in onLoadMore handler
-  // right before incrementing feedFetchKey. Both state updates are batched by React
-  // into a single render, so SWR sees the correct exclude list + new fetchKey together.
-  const [excludeIds, setExcludeIds] = useState<string[]>([]);
+  // Fix 2B: Track whether there is more content to load from the backend.
+  // Set to false when backend returns fewer videos than BATCH_SIZE.
+  const [hasMoreContent, setHasMoreContent] = useState(true);
 
+  // Fix 2A: excludeIds removed — backend dedup via Redis seen-set.
   // Fetch feed based on auth state
-  const { videos: apiVideos, mutate: mutateFeed } = usePersonalizedFeed(user ? user.id : null, feedLimit, feedFetchKey, excludeIds);
+  const { videos: apiVideos, mutate: mutateFeed } = usePersonalizedFeed(user ? user.id : null, feedLimit, feedFetchKey);
   const { videos: trendingVideos, mutate: mutateTrending } = useTrendingVideos(trendingLimit);
 
   // Select video source
@@ -153,15 +153,27 @@ function App() {
   const isCreatingSessionRef = useRef(false);
 
   useEffect(() => {
-    if (currentVideos && currentVideos.length > 0) {
-      setAccumulatedVideos(prev => {
-        const newVids = currentVideos.filter(cv => !prev.find(p => p.id === cv.id));
-        if (newVids.length > 0) {
-          // New batch arrived → reset the guard so the next batch can be fetched
-          hasFetchedNextBatch.current = false;
-        }
-        return newVids.length > 0 ? [...prev, ...newVids] : prev;
-      });
+    if (currentVideos) {
+      if (currentVideos.length > 0) {
+        setAccumulatedVideos(prev => {
+          const newVids = currentVideos.filter(cv => !prev.find(p => p.id === cv.id));
+          if (newVids.length > 0) {
+            // New batch arrived → reset the guard so the next batch can be fetched
+            hasFetchedNextBatch.current = false;
+          }
+
+          // Fix 2B: Detect end-of-content — if backend returned fewer than BATCH_SIZE,
+          // there are no more videos to load.
+          if (currentVideos.length < BATCH_SIZE) {
+            setHasMoreContent(false);
+          }
+
+          return newVids.length > 0 ? [...prev, ...newVids] : prev;
+        });
+      } else {
+        // Backend returned empty array → definitely no more content
+        setHasMoreContent(false);
+      }
     }
   }, [currentVideos]);
 
@@ -293,7 +305,7 @@ function App() {
   useEffect(() => {
     // Reset feed/video states
     setAccumulatedVideos([]);
-    setExcludeIds([]); // clear exclude list for fresh user
+    setHasMoreContent(true); // reset end-of-content flag for fresh user
     setFeedFetchKey(0); // reset fetch key so new user starts from batch 0
     // feedLimit is constant (BATCH_SIZE), no need to reset it
     setTrendingLimit(BATCH_SIZE);
@@ -412,7 +424,7 @@ function App() {
         stage1ShownRef.current = false;
         localVideoCountRef.current = 0;
         setAccumulatedVideos([]);
-        setExcludeIds([]); // clear exclude list for fresh session
+        setHasMoreContent(true); // reset end-of-content flag for fresh session
         // Reset fetch key to 1 → new SWR cache key → forces fresh fetch for new session
         setFeedFetchKey(1);
       } catch (error) {
@@ -590,12 +602,12 @@ function App() {
               swipeTrigger={swipeTrigger}
               onVideoActivated={handleVideoActivated}
               onLoadMore={() => {
-                if (hasFetchedNextBatch.current) return; // guard: already triggered for this batch
+                // Fix 2B: Stop fetching when no more content available
+                if (hasFetchedNextBatch.current || !hasMoreContent) return;
                 hasFetchedNextBatch.current = true;
                 if (user) {
-                  // Snapshot current accumulated IDs → backend will exclude these
-                  // React 18 batches both setState calls into one render.
-                  setExcludeIds(accumulatedVideos.map((v: any) => v.id));
+                  // Fix 2A: No excludeIds — backend dedup via Redis seen-set.
+                  // Just bump fetchKey to force SWR to make a new request.
                   setFeedFetchKey(prev => prev + 1);
                 } else {
                   // Trending: increase limit so backend returns more results
