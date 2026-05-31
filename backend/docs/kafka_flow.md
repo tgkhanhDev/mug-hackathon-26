@@ -60,7 +60,12 @@ Khi Frontend gọi API `record_behavior_log`, file `interaction_service.py` sẽ
 - Hành động này là **Fire-and-forget** (thực hiện qua `asyncio.create_task`), API sẽ ngay lập tức trả về HTTP 201 cho Frontend mà không đợi Kafka hay Database.
 
 ### Bước 3: Tiêu thụ Message (Consumer Worker)
-Bên trong FastAPI có một background process (chạy ngầm từ lúc startup app) nằm tại `behavior_log_consumer.py`. Khi có message mới trong topic `behavior_logs`, Consumer sẽ bắt lấy và thực hiện Pipeline nặng:
+Bên trong FastAPI có một task chạy ngầm (`run_behavior_log_consumer` trong `behavior_log_consumer.py`) được khởi tạo khi startup app. Nó chạy một vòng lặp vô tận (infinite loop) để liên tục lắng nghe topic `behavior_logs`. Consumer này được thiết kế cực kỳ bền bỉ (robust):
+- **Lazy Load DB:** Khởi tạo DB Repositories trễ (bên trong hàm) để tránh lỗi vòng lặp import và đảm bảo DB đã kết nối.
+- **Tự động phục hồi (Auto-Recovery):** Trang bị cơ chế Retry & Exponential Back-off (chờ 2s, 4s, 8s... lên đến 30s) nếu mất kết nối Kafka thay vì bị crash.
+- **Dừng an toàn (Graceful Shutdown):** Tự động đóng các kết nối khi nhận tín hiệu huỷ (lúc tắt server).
+
+Khi có message mới, Consumer gọi hàm xử lý nghiệp vụ (Pipeline) nặng:
 1. **Tính toán ngữ cảnh:** Lấy lịch sử 10 video gần nhất để xem user có đang xem cùng một chủ đề (topic) liên tục không (`consecutive_same_topic`).
 2. **Lưu Database:** Lưu tài liệu `BehaviorLog` vào MongoDB.
 3. **Cập nhật cường độ:** Tăng bộ đếm `high_intensity_count` hoặc `low_intensity_count` của session.

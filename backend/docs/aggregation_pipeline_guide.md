@@ -59,11 +59,14 @@ pipeline = [
             "index": "video_embedding_index",
             "path": "embedding",
             "queryVector": query_vector,
-            "numCandidates": num_candidates,
-            "limit": limit
+            "numCandidates": vs_candidates,
+            "limit": vs_limit # Over-fetch: bù trừ cho các video sẽ bị loại bỏ
         }
     },
-    # (Tùy chọn) Stage $match để lọc bớt video quá nặng hoặc chống nhàm chán (fatigue)
+    # Post-filter: Stage $match phải nằm NGAY SAU $vectorSearch (Quy chuẩn của Atlas)
+    {
+        "$match": {"$and": [{"status": "completed"}, filter_stage]}
+    },
     {
         "$addFields": {
             "search_score": {"$meta": "vectorSearchScore"},
@@ -86,8 +89,28 @@ pipeline = [
             }
         }
     },
+    # Cơ Chế Chống Mệt Mỏi (Adaptive Fatigue Sorting)
+    # Nếu người dùng ở trạng thái "exhausted", thêm trường intensity_rank
     {
-        "$sort": {"total_score": -1}
+        "$addFields": {
+            "intensity_rank": {
+                "$switch": {
+                    "branches": [
+                        {"case": {"$eq": ["$intensity_level", "low"]}, "then": 0},
+                        {"case": {"$eq": ["$intensity_level", "medium"]}, "then": 1},
+                    ],
+                    "default": 2  # high
+                }
+            }
+        }
+    },
+    # Sắp xếp ưu tiên cường độ thấp trước, sau đó mới xét đến tổng điểm
+    {
+        "$sort": {"intensity_rank": 1, "total_score": -1}
+    },
+    # Lọc lại kết quả cuối cùng theo limit ban đầu sau khi đã loại trừ
+    {
+        "$limit": limit
     }
 ]
 ```
@@ -96,17 +119,23 @@ pipeline = [
 1. **`$vectorSearch` (Stage đầu tiên bắt buộc)**:
    - Chạy trên Atlas Search Index (`video_embedding_index`).
    - So sánh vector sở thích người dùng (`queryVector`) với trường vector embedding của video (`path: "embedding"`).
-   - `numCandidates` (ví dụ: 50-100) là số lượng video ứng viên có độ tương đồng cao nhất được quét trước khi chọn ra top kết quả.
-2. **`$addFields` (Trích xuất score)**:
+   - **Over-fetch**: `limit` và `numCandidates` được cộng thêm số lượng video đã xem (`num_exclude`) để bù đắp kết quả, đảm bảo sau khi lọc bớt (post-filter), hệ thống vẫn trả đủ số lượng video được yêu cầu.
+2. **`$match` (Post-filter Stage)**:
+   - Nằm ngay sau `$vectorSearch` để loại trừ các video đã xem hoặc lọc theo thể loại, đồng thời luôn yêu cầu `status: "completed"`. Đây là quy chuẩn đúng đắn của MongoDB Atlas Vector Search để có hiệu suất tốt nhất.
+3. **`$addFields` (Trích xuất score)**:
    - Thêm `search_score` lấy từ hệ số tương đồng vector của MongoDB (`{"$meta": "vectorSearchScore"}`). Hệ số này nằm trong khoảng `[0, 1]`.
-   - Tính toán trường `trending_score` theo công thức tương tự phần 2.1.
-3. **`$addFields` (Tính toán tổng điểm kết hợp - Hybrid Score)**:
+   - Tính toán trường `trending_score` thông qua helper `build_trending_score_pipeline_stage()`.
+4. **`$addFields` (Tính toán tổng điểm kết hợp - Hybrid Score)**:
    - Tính toán `total_score` theo công thức:
      $$\text{total\_score} = (\text{search\_score} \times \text{search\_weight}) + (\text{trending\_score} \times \text{trending\_weight})$$
-   - Cấu hình trọng số mặc định:
-     - `search_weight = 10.0` (Ưu tiên chính cho sở thích người dùng).
-     - `trending_weight = 0.001` (Tránh để trending score lấn át hoàn toàn vector search, vì trending score có thể lên tới hàng nghìn, trong khi search score tối đa là 1.0).
-4. **`$sort`**: Sắp xếp danh sách ứng viên theo `total_score` giảm dần để đưa video phù hợp nhất lên đầu.
+   - Cấu hình trọng số (trong Codebase hiện tại):
+     - `search_weight = 100.0` (Ưu tiên chính cho sở thích người dùng, do search score chỉ <= 1.0).
+     - `trending_weight = 1.0` (Cân bằng tốt giữa độ tương đồng và mức độ phổ biến của video).
+5. **Cơ Chế Chống Mệt Mỏi (Adaptive Fatigue Sorting)**:
+   - Nếu hệ thống phát hiện người dùng đang "mệt mỏi" (`adaptive_state == "exhausted"`), một `$addFields` stage sẽ sử dụng toán tử `$switch` để xếp hạng mức độ căng thẳng của video (`intensity_rank`): `low = 0`, `medium = 1`, `high = 2`.
+   - Toán tử `$sort` sau đó sẽ ưu tiên `intensity_rank` tăng dần (`1`), rồi mới tới `total_score` giảm dần (`-1`). Điều này ép các video `low` (nhẹ nhàng, thư giãn) luôn nằm trên cùng dù tổng điểm có thấp hơn. Nếu ở trạng thái bình thường, nó chỉ sort theo `total_score: -1`.
+6. **`$limit` (Final Trim)**:
+   - Cắt lại danh sách kết quả vừa đủ số lượng `limit` ban đầu sau khi đã loại bỏ qua `$match` để tối ưu kích thước response.
 
 ---
 

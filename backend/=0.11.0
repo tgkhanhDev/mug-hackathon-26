@@ -1,0 +1,8 @@
+Collecting aiokafka
+  Downloading aiokafka-0.14.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (1.0 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.0/1.0 MB 2.6 MB/s eta 0:00:00
+Requirement already satisfied: typing_extensions>=4.10.0 in ./venv/lib/python3.10/site-packages (from aiokafka) (4.15.0)
+Requirement already satisfied: async-timeout in ./venv/lib/python3.10/site-packages (from aiokafka) (5.0.1)
+Requirement already satisfied: packaging in ./venv/lib/python3.10/site-packages (from aiokafka) (26.2)
+Installing collected packages: aiokafka
+Successfully installed aiokafka-0.14.0
