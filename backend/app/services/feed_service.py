@@ -151,6 +151,7 @@ class FeedService:
         # 4. Generate feed with progressive fallback strategy
         # Fallback ladder: full filter → dedup-only → no filter (avoid total empty)
         interest_vector = user.get("interest_vector", [])
+        interest_tags = user.get("interest_tags", [])
         search_weight, trending_weight = self._get_adaptive_weights(adaptive_state)
 
         docs = await self._fetch_feed(
@@ -162,6 +163,7 @@ class FeedService:
             trending_weight=trending_weight,
             filter_stage=combined_filter,
             num_exclude=len(seen_set),
+            interest_tags=interest_tags,
         )
 
         # Fallback 1: intensity filter too strict → drlúcop it, keep dedup only
@@ -179,6 +181,7 @@ class FeedService:
                 trending_weight=trending_weight,
                 filter_stage=seen_ids_filter,  # dedup only, no intensity constraint
                 num_exclude=len(seen_set),
+                interest_tags=interest_tags,
             )
 
         # Fallback 2: still empty → user has seen everything → drop dedup filter too
@@ -195,6 +198,7 @@ class FeedService:
                 search_weight=search_weight,
                 trending_weight=trending_weight,
                 filter_stage=None,  # no filter at all
+                interest_tags=interest_tags,
             )
 
         # 5. Exploration Factor (inject one trending video to break filter bubble)
@@ -252,14 +256,25 @@ class FeedService:
         trending_weight: float,
         filter_stage: Optional[Dict[str, Any]],
         num_exclude: int = 0,
+        interest_tags: List[str] = None,
     ) -> List[Dict[str, Any]]:
         """Internal helper — run either cold-start trending or vector search."""
         if not interest_vector:
-            logger.info(f"❄️ Cold start feed for user: {user_id} (fetching trending videos)")
-            return await self._video_repo.find_trending(
-                limit=limit,
-                filter_stage=filter_stage,
-            )
+            if interest_tags and len(interest_tags) > 0:
+                logger.info(
+                    f"❄️ Cold-start feed for user {user_id} using interest_tags: {interest_tags}"
+                )
+                return await self._video_repo.find_by_tags(
+                    tags=interest_tags,
+                    limit=limit,
+                    filter_stage=filter_stage
+                )
+            else:
+                logger.info(f"❄️ Generic trending feed for anonymous user {user_id}")
+                return await self._video_repo.find_trending(
+                    limit=limit,
+                    filter_stage=filter_stage,
+                )
         else:
             logger.info(
                 f"🌿 Personalized feed for user: {user_id} | state={adaptive_state} "
