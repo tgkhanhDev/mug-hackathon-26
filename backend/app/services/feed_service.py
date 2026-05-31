@@ -151,6 +151,7 @@ class FeedService:
         # 4. Generate feed with progressive fallback strategy
         # Fallback ladder: full filter → dedup-only → no filter (avoid total empty)
         interest_vector = user.get("interest_vector", [])
+        interest_tags = user.get("interest_tags", [])
         search_weight, trending_weight = self._get_adaptive_weights(adaptive_state)
 
         docs = await self._fetch_feed(
@@ -162,24 +163,32 @@ class FeedService:
             trending_weight=trending_weight,
             filter_stage=combined_filter,
             num_exclude=len(seen_set),
+            interest_tags=interest_tags,
         )
 
-        # Fallback 1: intensity filter too strict → drlúcop it, keep dedup only
+        # Fallback 1: intensity filter too strict → fetch remaining from trending to fill the gap
         if len(docs) < limit and intensity_filter is not None:
+            needed = limit - len(docs)
             logger.info(
                 f"⚠️ Feed too small ({len(docs)}/{limit}) with intensity filter "
-                f"— relaxing to dedup-only for user {user_id}"
+                f"— filling {needed} docs with safe trending videos for user {user_id}"
             )
-            docs = await self._fetch_feed(
-                interest_vector=interest_vector,
-                user_id=user_id,
-                limit=limit,
-                adaptive_state=adaptive_state,
-                search_weight=search_weight,
-                trending_weight=trending_weight,
-                filter_stage=seen_ids_filter,  # dedup only, no intensity constraint
-                num_exclude=len(seen_set),
+            # Fetch generic trending but STILL keep the intensity filter and dedup filter!
+            current_doc_ids = {doc.get("id", doc.get("_id")) for doc in docs}
+            fallback_exclude_filter = None
+            if seen_set or current_doc_ids:
+                all_excluded = seen_set | current_doc_ids
+                valid_oids = [ObjectId(vid) for vid in all_excluded if vid and ObjectId.is_valid(str(vid))]
+                if valid_oids:
+                    fallback_exclude_filter = {"_id": {"$nin": valid_oids}}
+            
+            fallback_filter = _merge_filters(intensity_filter, fallback_exclude_filter)
+            
+            fallback_docs = await self._video_repo.find_trending(
+                limit=needed,
+                filter_stage=fallback_filter,
             )
+            docs.extend(fallback_docs)
 
         # Fallback 2: still empty → user has seen everything → drop dedup filter too
         if len(docs) == 0 and seen_ids_filter is not None:
@@ -195,6 +204,7 @@ class FeedService:
                 search_weight=search_weight,
                 trending_weight=trending_weight,
                 filter_stage=None,  # no filter at all
+                interest_tags=interest_tags,
             )
 
         # 5. Exploration Factor (inject one trending video to break filter bubble)
@@ -223,8 +233,8 @@ class FeedService:
                     f"({exploration_video.get('id')}) to break filter bubble."
                 )
 
-        # 6. Palette Cleanser Injection (exhausted/critical state only)
-        if adaptive_state in ["exhausted", "critical"] and limit >= 3 and len(docs) >= 2:
+        # 6. Palette Cleanser Injection (warning/exhausted/critical state)
+        if adaptive_state in ["warning", "exhausted", "critical"] and limit >= 3 and len(docs) >= 2:
             cleanser = await self._video_repo.find_random_calming(
                 exclude_ids=seen_set | {doc["id"] for doc in docs},
                 calming_categories=["calming", "nature"],
@@ -252,14 +262,25 @@ class FeedService:
         trending_weight: float,
         filter_stage: Optional[Dict[str, Any]],
         num_exclude: int = 0,
+        interest_tags: List[str] = None,
     ) -> List[Dict[str, Any]]:
         """Internal helper — run either cold-start trending or vector search."""
         if not interest_vector:
-            logger.info(f"❄️ Cold start feed for user: {user_id} (fetching trending videos)")
-            return await self._video_repo.find_trending(
-                limit=limit,
-                filter_stage=filter_stage,
-            )
+            if interest_tags and len(interest_tags) > 0:
+                logger.info(
+                    f"❄️ Cold-start feed for user {user_id} using interest_tags: {interest_tags}"
+                )
+                return await self._video_repo.find_by_tags(
+                    tags=interest_tags,
+                    limit=limit,
+                    filter_stage=filter_stage
+                )
+            else:
+                logger.info(f"❄️ Generic trending feed for anonymous user {user_id}")
+                return await self._video_repo.find_trending(
+                    limit=limit,
+                    filter_stage=filter_stage,
+                )
         else:
             logger.info(
                 f"🌿 Personalized feed for user: {user_id} | state={adaptive_state} "

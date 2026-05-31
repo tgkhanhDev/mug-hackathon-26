@@ -73,6 +73,7 @@ async def _handle_message(msg: dict, log_repo, session_repo, video_repo) -> None
         await session_repo.update_intensity_count(
             session_id, video["intensity_level"]
         )
+    await session_repo.increment_videos_watched(session_id)
 
     # ④ Re-calculate fatigue score
     session = await session_repo.find_by_id(session_id)
@@ -95,7 +96,8 @@ async def _handle_message(msg: dict, log_repo, session_repo, video_repo) -> None
 
     high_count = session.get("high_intensity_count", 0)
     low_count = session.get("low_intensity_count", 0)
-    fatigue_score = calculate_fatigue_score(log_penalties, high_count, low_count)
+    total_videos = session.get("total_videos_watched", 0)
+    fatigue_score = calculate_fatigue_score(log_penalties, high_count, low_count, total_videos)
     adaptive_state = determine_adaptive_state(fatigue_score)
 
     stats = {

@@ -16,11 +16,15 @@ class VideoRepository(BaseRepository):
         super().__init__(get_collection("videos"))
 
     async def find_by_tags(
-        self, tags: List[str], limit: int = 20
+        self, tags: List[str], limit: int = 20, filter_stage: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
         """Find videos that match any of the given tags sorted by dynamic trending_score."""
+        match_filter = {"status": "completed", "tags": {"$in": tags}}
+        if filter_stage:
+            match_filter = {"$and": [match_filter, filter_stage]}
+
         pipeline = [
-            {"$match": {"status": "completed", "tags": {"$in": tags}}},
+            {"$match": match_filter},
             build_trending_score_pipeline_stage(),
             {"$sort": {"trending_score": -1}},
             {"$limit": limit}

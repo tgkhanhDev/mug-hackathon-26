@@ -95,6 +95,7 @@ def calculate_fatigue_score(
     log_penalties: List[int],
     high_intensity_count: int,
     low_intensity_count: int,
+    total_videos_watched: int = 0,
 ) -> float:
     """Compute the overall fatigue score from per-log penalties + dopamine ratio.
 
@@ -102,6 +103,7 @@ def calculate_fatigue_score(
         log_penalties:        Penalty points for each of the recent behavior logs.
         high_intensity_count: Number of high-intensity videos watched in session.
         low_intensity_count:  Number of low-intensity videos watched in session.
+        total_videos_watched: Total number of videos watched in session.
 
     Returns:
         A float clamped to [0.0, 100.0].
@@ -120,7 +122,12 @@ def calculate_fatigue_score(
         else 0.0
     )
 
-    return min(100.0, max(0.0, avg_log_points + dopamine_penalty))
+    # ── SESSION-BASED ACCUMULATION ──────────────────────────────────
+    # The more videos watched in the session, the higher the fatigue grows.
+    # Accumulate 0.5 points per video watched.
+    volume_penalty = total_videos_watched * 0.5
+
+    return min(100.0, max(0.0, avg_log_points + dopamine_penalty + volume_penalty))
 
 
 def determine_adaptive_state(fatigue_score: float) -> str:
