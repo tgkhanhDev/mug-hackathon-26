@@ -166,23 +166,29 @@ class FeedService:
             interest_tags=interest_tags,
         )
 
-        # Fallback 1: intensity filter too strict → drlúcop it, keep dedup only
+        # Fallback 1: intensity filter too strict → fetch remaining from trending to fill the gap
         if len(docs) < limit and intensity_filter is not None:
+            needed = limit - len(docs)
             logger.info(
                 f"⚠️ Feed too small ({len(docs)}/{limit}) with intensity filter "
-                f"— relaxing to dedup-only for user {user_id}"
+                f"— filling {needed} docs with safe trending videos for user {user_id}"
             )
-            docs = await self._fetch_feed(
-                interest_vector=interest_vector,
-                user_id=user_id,
-                limit=limit,
-                adaptive_state=adaptive_state,
-                search_weight=search_weight,
-                trending_weight=trending_weight,
-                filter_stage=seen_ids_filter,  # dedup only, no intensity constraint
-                num_exclude=len(seen_set),
-                interest_tags=interest_tags,
+            # Fetch generic trending but STILL keep the intensity filter and dedup filter!
+            current_doc_ids = {doc.get("id", doc.get("_id")) for doc in docs}
+            fallback_exclude_filter = None
+            if seen_set or current_doc_ids:
+                all_excluded = seen_set | current_doc_ids
+                valid_oids = [ObjectId(vid) for vid in all_excluded if vid and ObjectId.is_valid(str(vid))]
+                if valid_oids:
+                    fallback_exclude_filter = {"_id": {"$nin": valid_oids}}
+            
+            fallback_filter = _merge_filters(intensity_filter, fallback_exclude_filter)
+            
+            fallback_docs = await self._video_repo.find_trending(
+                limit=needed,
+                filter_stage=fallback_filter,
             )
+            docs.extend(fallback_docs)
 
         # Fallback 2: still empty → user has seen everything → drop dedup filter too
         if len(docs) == 0 and seen_ids_filter is not None:
@@ -227,8 +233,8 @@ class FeedService:
                     f"({exploration_video.get('id')}) to break filter bubble."
                 )
 
-        # 6. Palette Cleanser Injection (exhausted/critical state only)
-        if adaptive_state in ["exhausted", "critical"] and limit >= 3 and len(docs) >= 2:
+        # 6. Palette Cleanser Injection (warning/exhausted/critical state)
+        if adaptive_state in ["warning", "exhausted", "critical"] and limit >= 3 and len(docs) >= 2:
             cleanser = await self._video_repo.find_random_calming(
                 exclude_ids=seen_set | {doc["id"] for doc in docs},
                 calming_categories=["calming", "nature"],
