@@ -66,6 +66,7 @@ function App() {
   // Refs (tồn tại trong 1 session, reset khi end session/logout)
   const touchGrassWarnedRef = useRef(false);     // đã hiện stage 1 và user chọn "tiếp tục"
   const videoCountAtWarningRef = useRef(0);       // số video đã xem lúc stage 1 bị dismiss
+  const fatigueAtWarningRef = useRef(0);          // điểm fatigue lúc stage 1 bị dismiss
   const stage1ShownRef = useRef(false);           // guard: không show stage 1 lặp lại
   const localVideoCountRef = useRef(0);           // mirror của localVideoCount state
 
@@ -86,7 +87,8 @@ function App() {
     // Check stage 2 trigger ngay khi video mới được activate
     if (
       touchGrassWarnedRef.current &&
-      localVideoCountRef.current - videoCountAtWarningRef.current >= 3
+      localVideoCountRef.current - videoCountAtWarningRef.current >= 3 &&
+      prevFatigueRef.current > fatigueAtWarningRef.current
     ) {
       touchGrassWarnedRef.current = false;
       setTouchGrassStage(2);
@@ -242,10 +244,11 @@ function App() {
       setShowTouchGrassModal(true);
     }
 
-    // --- Stage 2: Force quit nếu user đã bỏ qua cảnh báo + xem thêm 3 video ---
+    // --- Stage 2: Force quit nếu user đã bỏ qua cảnh báo + xem thêm 3 video + fatigue tăng ---
     if (
       touchGrassWarnedRef.current &&
-      localVideoCountRef.current - videoCountAtWarningRef.current >= 3
+      localVideoCountRef.current - videoCountAtWarningRef.current >= 3 &&
+      newScore > fatigueAtWarningRef.current
     ) {
       touchGrassWarnedRef.current = false;
       setTouchGrassStage(2);
@@ -333,6 +336,7 @@ function App() {
     prevFatigueRef.current = 0;
     touchGrassWarnedRef.current = false;
     videoCountAtWarningRef.current = 0;
+    fatigueAtWarningRef.current = 0;
     stage1ShownRef.current = false;
     localVideoCountRef.current = 0;
   }, [user?.id]);
@@ -373,6 +377,7 @@ function App() {
     setShowTouchGrassModal(false);
     touchGrassWarnedRef.current = false;
     videoCountAtWarningRef.current = 0;
+    fatigueAtWarningRef.current = 0;
     stage1ShownRef.current = false;
     localVideoCountRef.current = 0;
     setCurrentActiveIndex(0);
@@ -431,6 +436,7 @@ function App() {
         prevFatigueRef.current = 0;
         touchGrassWarnedRef.current = false;
         videoCountAtWarningRef.current = 0;
+        fatigueAtWarningRef.current = 0;
         stage1ShownRef.current = false;
         localVideoCountRef.current = 0;
         setAccumulatedVideos([]);
@@ -451,6 +457,7 @@ function App() {
       prevFatigueRef.current = 0;
       touchGrassWarnedRef.current = false;
       videoCountAtWarningRef.current = 0;
+      fatigueAtWarningRef.current = 0;
       stage1ShownRef.current = false;
       localVideoCountRef.current = 0;
       setAccumulatedVideos([]);
@@ -466,6 +473,7 @@ function App() {
     // Reset all flags
     touchGrassWarnedRef.current = false;
     videoCountAtWarningRef.current = 0;
+    fatigueAtWarningRef.current = 0;
     stage1ShownRef.current = false;
     localVideoCountRef.current = 0;
     // End session + logout → farewell screen
@@ -477,6 +485,7 @@ function App() {
     setShowTouchGrassModal(false);
     touchGrassWarnedRef.current = true;
     videoCountAtWarningRef.current = localVideoCountRef.current;
+    fatigueAtWarningRef.current = prevFatigueRef.current;
   };
 
   return (
