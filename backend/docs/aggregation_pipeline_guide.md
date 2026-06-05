@@ -40,12 +40,28 @@ pipeline = [
 ```
 
 #### Giải thích các Stages:
+
 1. **`$addFields`**: Thêm một trường tạm thời tên là `trending_score` vào mỗi document kết quả.
    - **`$ifNull`**: Đảm bảo nếu trường `view_count`, `like_count`, hoặc `comment_count` chưa tồn tại hoặc mang giá trị `null`, MongoDB sẽ tự động thay bằng số `0` để tránh lỗi tính toán.
    - **`$multiply`**: Nhân số lượng tương tác tương ứng với trọng số (`view * 1`, `like * 3`, `comment * 5`).
-   - **`$add`**: Cộng tổng các tích trên lại để ra `trending_score`.
-2. **`$sort`**: Sắp xếp các video theo `trending_score` giảm dần (`-1`).
+   - **`$add`**: **CỘNG** tổng các tích trên lại để ra `trending_score`.
+   
+   **Ví dụ tính toán:**
+   ```
+   Video có: view_count=100, like_count=20, comment_count=5
+   
+   Stage này tính:
+   ├─ $multiply[100, 1] = 100
+   ├─ $multiply[20, 3] = 60
+   ├─ $multiply[5, 5] = 25
+   └─ $add[100, 60, 25] = 185 (trending_score)
+   ```
+
+2. **`$sort`**: Sắp xếp các video theo `trending_score` giảm dần (`-1` = descending).
+   - Video có `trending_score` cao nhất được xếp lên trước.
+
 3. **`$limit`**: Giới hạn số lượng video trả về (mặc định là 10-20 videos) để giảm tải cho API.
+   - Chỉ trả top N video hot nhất.
 
 ---
 
@@ -98,17 +114,24 @@ pipeline = [
                     "branches": [
                         {"case": {"$eq": ["$intensity_level", "low"]}, "then": 0},
                         {"case": {"$eq": ["$intensity_level", "medium"]}, "then": 1},
+                        {"case": {"$eq": ["$intensity_level", "high"]}, "then": 2}
                     ],
-                    "default": 2  # high
+                    "default": 2
                 }
             }
         }
     },
-    # Sắp xếp ưu tiên cường độ thấp trước, sau đó mới xét đến tổng điểm
+    # Stage 6: Sắp xếp ưu tiên cường độ thấp trước, sau đó mới xét đến tổng điểm
+    # Nếu exhausted: low intensity trước → total_score cao
+    # Nếu normal: chỉ cần sort theo total_score giảm dần
     {
-        "$sort": {"intensity_rank": 1, "total_score": -1}
+        "$sort": {
+            "intensity_rank": 1,      # Low intensity (0) comes first
+            "total_score": -1         # Then highest total_score
+        }
     },
-    # Lọc lại kết quả cuối cùng theo limit ban đầu sau khi đã loại trừ
+    # Stage 7: Lọc lại kết quả cuối cùng theo limit ban đầu sau khi đã loại trừ
+    # Đảm bảo trả về đúng số lượng video cần thiết
     {
         "$limit": limit
     }
@@ -122,18 +145,49 @@ pipeline = [
    - **Over-fetch**: `limit` và `numCandidates` được cộng thêm số lượng video đã xem (`num_exclude`) để bù đắp kết quả, đảm bảo sau khi lọc bớt (post-filter), hệ thống vẫn trả đủ số lượng video được yêu cầu.
 2. **`$match` (Post-filter Stage)**:
    - Nằm ngay sau `$vectorSearch` để loại trừ các video đã xem hoặc lọc theo thể loại, đồng thời luôn yêu cầu `status: "completed"`. Đây là quy chuẩn đúng đắn của MongoDB Atlas Vector Search để có hiệu suất tốt nhất.
-3. **`$addFields` (Trích xuất score)**:
+3. **`$addFields` (Trích xuất score + Tính toán trending)**:
    - Thêm `search_score` lấy từ hệ số tương đồng vector của MongoDB (`{"$meta": "vectorSearchScore"}`). Hệ số này nằm trong khoảng `[0, 1]`.
-   - Tính toán trường `trending_score` thông qua helper `build_trending_score_pipeline_stage()`.
+   - Tính toán trường `trending_score` theo công thức động: `view*1 + like*3 + comment*5`.
+   
+   **Mục đích**: Kết hợp 2 loại điểm:
+   - `search_score` = Độ tương đồng ngữ nghĩa (người dùng có thích tag này không?)
+   - `trending_score` = Độ hot hiện tại (video có được mọi người yêu thích không?)
 4. **`$addFields` (Tính toán tổng điểm kết hợp - Hybrid Score)**:
    - Tính toán `total_score` theo công thức:
      $$\text{total\_score} = (\text{search\_score} \times \text{search\_weight}) + (\text{trending\_score} \times \text{trending\_weight})$$
+   
    - Cấu hình trọng số (trong Codebase hiện tại):
-     - `search_weight = 100.0` (Ưu tiên chính cho sở thích người dùng, do search score chỉ <= 1.0).
-     - `trending_weight = 1.0` (Cân bằng tốt giữa độ tương đồng và mức độ phổ biến của video).
-5. **Cơ Chế Chống Mệt Mỏi (Adaptive Fatigue Sorting)**:
-   - Nếu hệ thống phát hiện người dùng đang "mệt mỏi" (`adaptive_state == "exhausted"`), một `$addFields` stage sẽ sử dụng toán tử `$switch` để xếp hạng mức độ căng thẳng của video (`intensity_rank`): `low = 0`, `medium = 1`, `high = 2`.
-   - Toán tử `$sort` sau đó sẽ ưu tiên `intensity_rank` tăng dần (`1`), rồi mới tới `total_score` giảm dần (`-1`). Điều này ép các video `low` (nhẹ nhàng, thư giãn) luôn nằm trên cùng dù tổng điểm có thấp hơn. Nếu ở trạng thái bình thường, nó chỉ sort theo `total_score: -1`.
+     - `search_weight = 100.0` (Ưu tiên **99%** cho sở thích người dùng, do search score chỉ <= 1.0, nên cần nhân 100 để thay đổi được).
+     - `trending_weight = 1.0` (Chỉ cân bằng ~1%, không làm áng buộc recommendation).
+   
+   **Ví dụ:**
+   ```
+   search_score = 0.85 (video này rất phù hợp với sở thích)
+   trending_score = 500 (video này đang hot)
+   
+   total_score = (0.85 × 100.0) + (500 × 1.0)
+               = 85 + 500
+               = 585
+   ```
+5. **Cơ Chế Chống Mệt Mỏi (Adaptive Fatigue Sorting)** - 🛡️ Digital Wellbeing:
+   - **Khi `adaptive_state == "exhausted"`** (người dùng đã xem quá lâu, cần thư giãn):
+     - Thêm `intensity_rank` bằng `$switch`: `low = 0`, `medium = 1`, `high = 2`.
+     - Video "low intensity" (nhẹ nhàng, thư giãn) được ưu tiên lên trước, dù `total_score` có thấp hơn.
+     - **Mục đích**: Bảo vệ sức khỏe tâm lý người dùng, đề xuất nội dung giáng stress.
+   
+   - **Khi `adaptive_state == "normal"`** (người dùng bình thường):
+     - Không thêm `intensity_rank`, chỉ sort theo `total_score: -1`.
+     - Ưu tiên recommendation dựa trên relevance + trending.
+   
+   **Ví dụ (exhausted state):**
+   ```
+   Video A: intensity_rank=0 (low),  total_score=200 → Rank 1 (ưu tiên)
+   Video B: intensity_rank=1 (med),  total_score=500 → Rank 2
+   Video C: intensity_rank=2 (high), total_score=800 → Rank 3
+   
+   Sắp xếp theo: intensity_rank ASC, total_score DESC
+   → Người dùng mệt được xem video thư giãn trước dù score thấp
+   ```
 6. **`$limit` (Final Trim)**:
    - Cắt lại danh sách kết quả vừa đủ số lượng `limit` ban đầu sau khi đã loại bỏ qua `$match` để tối ưu kích thước response.
 
