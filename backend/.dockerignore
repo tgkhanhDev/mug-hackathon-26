@@ -1,0 +1,17 @@
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.idea
+mongo_data
+mongo_atlas_data
+mongo_atlas_config
+mongo_atlas_search
+mongot_data
+redis_data
+minio_data
+videos
+.env
+.env.bak
+*.log

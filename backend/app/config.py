@@ -20,9 +20,22 @@ class Settings(BaseSettings):
     )
 
     # ── Redis (Seen-Set Cache) ─────────────────────────────────
+    REDIS_HOST: str = Field(
+        default="redis",
+        description="Redis hostname (Docker service name)",
+    )
+    REDIS_PORT: int = Field(
+        default=6379,
+        description="Redis port",
+    )
+    REDIS_DB: int = Field(
+        default=0,
+        description="Redis DB index",
+    )
+    # Optional: keep URL for compatibility
     REDIS_URL: str = Field(
-        default="redis://localhost:6379/0",
-        description="Redis connection URL for session seen-set cache",
+        default="redis://redis:6379/0",
+        description="Redis connection URL for backward compatibility",
     )
 
     # ── Celery Asynchronous Task Queue ─────────────────────────

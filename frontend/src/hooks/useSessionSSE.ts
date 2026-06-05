@@ -41,7 +41,7 @@ export function useSessionSSE(
       return;
     }
 
-    const url = `http://localhost:8033/api/v1/sessions/${sessionId}/events`;
+    const url = `/api/v1/sessions/${sessionId}/events`;
     const es = new EventSource(url);
 
     es.onopen = () => {

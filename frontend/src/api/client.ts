@@ -1,7 +1,7 @@
 import useSWR from 'swr';
 
-export const API_URL = 'http://localhost:8033/api/v1';
-export const WS_URL = 'ws://localhost:8033/api/v1/ws/stats';
+export const API_URL = '/api/v1';
+export const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/v1/ws/stats`;
 
 export const fetcher = (url: string) => fetch(url).then((res) => {
   if (!res.ok) {

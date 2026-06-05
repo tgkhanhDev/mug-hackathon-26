@@ -1,0 +1,130 @@
+version: '3.8'
+
+services:
+  # 1. Redis - Used for Celery results and session seen-set cache
+  redis:
+    image: redis:alpine
+    container_name: gotouchgrass-prod-redis
+    restart: always
+    volumes:
+      - redis_prod_data:/data
+
+  # 2. RabbitMQ - Message broker for Celery
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: gotouchgrass-prod-rabbitmq
+    restart: always
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+
+  # 3. MinIO - Local dedicated S3-compatible media storage
+  minio:
+    image: quay.io/minio/minio:latest
+    container_name: gotouchgrass-prod-minio
+    restart: always
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    volumes:
+      - minio_prod_data:/data
+    command: server /data --console-address ":9001"
+
+  # 3.5. Apache Kafka - KRaft mode (no Zookeeper required)
+  kafka:
+    image: apache/kafka:latest
+    container_name: gotouchgrass-prod-kafka
+    restart: always
+    environment:
+      - KAFKA_NODE_ID=1
+      - KAFKA_PROCESS_ROLES=broker,controller
+      - KAFKA_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      - KAFKA_CONTROLLER_QUORUM_VOTERS=1@kafka:9093
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1
+    volumes:
+      - kafka_prod_data:/var/lib/kafka/data
+
+  # 4. FastAPI Backend Application
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: gotouchgrass-prod-backend
+    restart: always
+    depends_on:
+      - redis
+      - rabbitmq
+      - minio
+      - kafka
+    ports:
+      - "8033:8033"
+    environment:
+      - MONGODB_URI=${MONGODB_URI}
+      - DATABASE_NAME=${DATABASE_NAME:-gotouchgrass}
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672//
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - MINIO_ENDPOINT_URL=${MINIO_ENDPOINT_URL:-http://localhost:9000}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
+      - MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME:-gotouchgrass-media}
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - PEXELS_API_KEY=${PEXELS_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - PORT=8033
+    volumes:
+      - /tmp/uploads:/tmp/uploads
+
+  # 5. Celery Worker for Video Processing (using same backend image)
+  celery:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: gotouchgrass-prod-celery
+    restart: always
+    command: celery -A app.celery_app worker --loglevel=info --concurrency=2
+    depends_on:
+      - redis
+      - rabbitmq
+      - minio
+      - kafka
+    environment:
+      - MONGODB_URI=${MONGODB_URI}
+      - DATABASE_NAME=${DATABASE_NAME:-gotouchgrass}
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672//
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - MINIO_ENDPOINT_URL=${MINIO_ENDPOINT_URL:-http://localhost:9000}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
+      - MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME:-gotouchgrass-media}
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - PEXELS_API_KEY=${PEXELS_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    volumes:
+      - /tmp/uploads:/tmp/uploads
+
+  # 6. React/Vite Frontend served by Nginx (acts as reverse proxy for API / Websockets)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: gotouchgrass-prod-frontend
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  redis_prod_data:
+  minio_prod_data:
+  kafka_prod_data:

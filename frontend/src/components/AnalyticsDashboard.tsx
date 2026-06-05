@@ -5,7 +5,7 @@ interface AnalyticsDashboardProps {
   fatigueScore: number;
   fatigueHistory: number[];
   sessionVideoCount: number;
-  adaptiveState: 'normal' | 'warning' | 'exhausted';
+  adaptiveState: 'normal' | 'warning' | 'exhausted' | 'critical';
   intensityCounts: Record<string, number>;
   currentCategory: string;
   onTriggerSwipe: (dir: 'up' | 'down', speed: 'slow' | 'fast') => void;

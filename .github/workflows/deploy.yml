@@ -1,0 +1,46 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches:
+      - release
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH and Deploy on VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || '22' }}
+          envs: MONGODB_URI,PEXELS_API_KEY,OPENAI_API_KEY
+          script: |
+            # Determine project path on VPS
+            PROJECT_PATH="${{ secrets.VPS_PROJECT_PATH }}"
+            if [ -z "$PROJECT_PATH" ]; then
+              PROJECT_PATH="/home/${{ secrets.VPS_USER }}/hackathon"
+            fi
+            
+            echo "📂 Target directory: $PROJECT_PATH"
+            
+            # If the directory doesn't exist, clone the repository
+            if [ ! -d "$PROJECT_PATH" ]; then
+              echo "⚠️ Directory $PROJECT_PATH does not exist. Cloning repository..."
+              mkdir -p "$(dirname "$PROJECT_PATH")"
+              git clone https://github.com/${{ github.repository }}.git "$PROJECT_PATH"
+            fi
+            
+            # Navigate to the project directory
+            cd "$PROJECT_PATH"
+            
+            # Ensure the deployment script is executable
+            chmod +x deploy.sh
+            
+            # Run deployment with environment variables populated from GitHub Secrets
+            MONGODB_URI="${{ secrets.MONGODB_URI }}" \
+            PEXELS_API_KEY="${{ secrets.PEXELS_API_KEY }}" \
+            OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
+            ./deploy.sh release

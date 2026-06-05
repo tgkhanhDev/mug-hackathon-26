@@ -1,21 +1,19 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { connectSessionWS, disconnectSessionWS } from './hooks/useVideoStats';
 import { useSessionSSE } from './hooks/useSessionSSE';
-import { Feed } from './components/Feed';
+import { Feed, type FeedHandle } from './components/Feed';
 import { BottomNav } from './components/BottomNav';
 import { AuthPopup } from './components/AuthPopup';
 import { AuthContext } from './context/AuthContext';
 import { AnalyticsDashboard } from './components/AnalyticsDashboard';
 import { TouchGrassModal } from './components/TouchGrassModal';
 import { FarewellScreen } from './components/FarewellScreen';
-import { Sparkles, Brain, Leaf, ShieldAlert } from 'lucide-react';
+import { Sparkles, Brain, Leaf } from 'lucide-react';
 import {
   useTrendingVideos,
   usePersonalizedFeed,
   startSession,
-  endSession,
-  sendBehaviorLog,
-  sendInteraction
+  endSession
 } from './api/client';
 
 
@@ -378,39 +376,39 @@ function App() {
     localVideoCountRef.current = 0;
   };
 
-  const simulateDoomscroll = async () => {
-    if (user && sessionId && feedVideos && feedVideos.length > 0) {
-      const activeVideo = feedVideos[0];
-      await sendBehaviorLog(
-        activeVideo.id,
-        activeVideo.tags?.[0] || 'general',
-        user.id,
-        sessionId,
-        950.0, // High swipe speed
-        0.5,   // Short watch duration
-        false  // No interaction
-      );
-      await sendInteraction(
-        activeVideo.id,
-        'skip',
-        0.05,
-        user.id,
-        sessionId,
-        0.5,
-        950.0
-      );
-      // SSE will push the updated fatigue score automatically — no setTimeout needed
-    } else {
-      // Fallback simulation when logged out
-      setFatigueScore(prev => {
-        const next = Math.min(prev + 15, 100);
-        if (next >= 75) {
-          setIsMindfulActive(true);
-        }
-        return next;
-      });
-    }
-  };
+  // const simulateDoomscroll = async () => {
+  //   if (user && sessionId && feedVideos && feedVideos.length > 0) {
+  //     const activeVideo = feedVideos[0];
+  //     await sendBehaviorLog(
+  //       activeVideo.id,
+  //       activeVideo.tags?.[0] || 'general',
+  //       user.id,
+  //       sessionId,
+  //       950.0, // High swipe speed
+  //       0.5,   // Short watch duration
+  //       false  // No interaction
+  //     );
+  //     await sendInteraction(
+  //       activeVideo.id,
+  //       'skip',
+  //       0.05,
+  //       user.id,
+  //       sessionId,
+  //       0.5,
+  //       950.0
+  //     );
+  //     // SSE will push the updated fatigue score automatically — no setTimeout needed
+  //   } else {
+  //     // Fallback simulation when logged out
+  //     setFatigueScore(prev => {
+  //       const next = Math.min(prev + 15, 100);
+  //       if (next >= 75) {
+  //         setIsMindfulActive(true);
+  //       }
+  //       return next;
+  //     });
+  //   }
+  // };
 
   const resetSession = async () => {
     feedRef.current?.flushActiveLog();

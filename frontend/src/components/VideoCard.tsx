@@ -130,9 +130,7 @@ export const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(({
             params.swipeSpeed,
             duration,
             wasInteracted
-          ).then(() => {
-            onRefreshSessionStats();
-          });
+          );
         }
       }
     }
