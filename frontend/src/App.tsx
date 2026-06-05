@@ -319,6 +319,7 @@ function App() {
     setFeedFetchKey(0); // reset fetch key so new user starts from batch 0
     // feedLimit is constant (BATCH_SIZE), no need to reset it
     setTrendingLimit(BATCH_SIZE);
+    setCurrentActiveIndex(0);
 
     // NEW: Reset analytics states (fix for cache not clearing on login/register)
     setFatigueScore(0);
@@ -376,6 +377,7 @@ function App() {
     videoCountAtWarningRef.current = 0;
     stage1ShownRef.current = false;
     localVideoCountRef.current = 0;
+    setCurrentActiveIndex(0);
   };
 
   const simulateDoomscroll = async () => {
@@ -437,6 +439,7 @@ function App() {
         setHasMoreContent(true); // reset end-of-content flag for fresh session
         // Reset fetch key to 1 → new SWR cache key → forces fresh fetch for new session
         setFeedFetchKey(1);
+        setCurrentActiveIndex(0);
       } catch (error) {
         console.error('Error resetting session:', error);
       }
@@ -454,6 +457,7 @@ function App() {
       localVideoCountRef.current = 0;
       setAccumulatedVideos([]);
       setTrendingLimit(BATCH_SIZE);
+      setCurrentActiveIndex(0);
       mutateTrending();
     }
   };
@@ -587,6 +591,7 @@ function App() {
           {/* Main Snapping Feed Container */}
           <div className="flex-1 w-full h-full relative z-0">
             <Feed
+              key={sessionId || 'guest'}
               ref={feedRef}
               videos={feedVideos}
               userId={user ? user.id : null}

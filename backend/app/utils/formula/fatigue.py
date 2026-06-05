@@ -113,7 +113,7 @@ def calculate_fatigue_score(
 
     # Dampen the average score when there are very few logs (e.g., at the start of a session)
     # by dividing by at least 5 logs. This prevents a single scroll from causing a massive spike.
-    avg_log_points = sum(log_penalties) / max(5, len(log_penalties))
+    avg_log_points = sum(log_penalties) / max(7, len(log_penalties))
 
     total_intensity = high_intensity_count + low_intensity_count
     dopamine_penalty = (
