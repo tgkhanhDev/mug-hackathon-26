@@ -21,6 +21,7 @@ from app.utils.scheduler import start_scheduler, stop_scheduler
 from app.utils.embedding import is_mock_mode
 from app.kafka.kafka_client import start_producer, stop_producer
 from app.workers.behavior_log_consumer import run_behavior_log_consumer
+from prometheus_fastapi_instrumentator import Instrumentator
 
 # ── Controllers ────────────────────────────────────────────────
 from app.controllers import video_controller
@@ -105,6 +106,9 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
+
+# ── Prometheus Instrumentation ────────────────────────────────
+Instrumentator().instrument(app).expose(app)
 
 # ── CORS Middleware ────────────────────────────────────────────
 app.add_middleware(
