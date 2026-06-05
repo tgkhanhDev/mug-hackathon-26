@@ -40,8 +40,8 @@ class Settings(BaseSettings):
 
     # ── Celery Asynchronous Task Queue ─────────────────────────
     CELERY_BROKER_URL: str = Field(
-        default="amqp://guest:guest@localhost:5672//",
-        description="RabbitMQ connection URL broker for Celery tasks",
+        default="redis://localhost:6379/0",
+        description="Redis connection URL broker for Celery tasks",
     )
     CELERY_RESULT_BACKEND: str = Field(
         default="redis://localhost:6379/0",

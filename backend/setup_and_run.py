@@ -123,7 +123,6 @@ def check_docker_images():
         "mongodb/mongodb-atlas-local:latest",
         "mongo-express:latest",
         "quay.io/minio/minio:latest",
-        "rabbitmq:3-management",
         "redis:alpine"
     ]
     logger.info("🔍 Checking required Docker images...")
@@ -149,7 +148,6 @@ def check_port_conflicts():
         6379: "Redis",
         9000: "MinIO API",
         9001: "MinIO Console",
-        5672: "RabbitMQ",
         8081: "Mongo Express UI",
         8033: "FastAPI server"
     }
@@ -265,7 +263,7 @@ def check_existing_services():
 
 def start_docker_services(docker_compose_cmd: List[str], skip_mongo: bool, skip_redis: bool):
     """Run docker compose up -d for services that are not already running on the host."""
-    services = ["minio", "rabbitmq", "mongo-express"]
+    services = ["minio", "mongo-express"]
     if not skip_mongo:
         services.append("mongodb")
     if not skip_redis:
