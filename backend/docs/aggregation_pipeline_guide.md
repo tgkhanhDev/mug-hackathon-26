@@ -193,6 +193,274 @@ pipeline = [
 
 ---
 
+## 2.3. Advanced Features: Score Bucketing & Content Diversification
+
+### A. Score Bucketing Logic: Khi nào fetch gì?
+
+Pipeline có cơ chế intelligent bucketing dựa trên `total_score`:
+
+```
+SCORE RANGE          | STRATEGY                     | INTENSITY PRIORITY
+─────────────────────────────────────────────────────────────────────
+0-40 điểm           | ❌ Skip - Quá yếu            | N/A
+(Quá không relevant) | Không recommend              |
+─────────────────────────────────────────────────────────────────────
+40-70 điểm          | ✅ SOFT INTRODUCE           | Medium → Low first
+(So-so, mở rộng)    | Fetch medium→low intensity  | (intensity_rank: 1→0)
+                    | → User xem từ từ, không     | Ưu tiên thư giãn
+                    |   quá stress lúc khám phá   | để user quen tag
+                    |   tag mới                   |
+─────────────────────────────────────────────────────────────────────
+70+ điểm            | 🔥 CLAIM + RERANK TAGS      | High→Med→Low
+(STRONGLY RELEVANT) | Priority claim nhưng        | (intensity_rank: 2→1→0)
+                    | rerank các tag user thích   | Đẩy tag yêu thích
+                    | xuống 2-3 rank              | xuống rank để
+                    | → Diversify! Tránh echo    | diversify content
+                    |   chamber                   |
+```
+
+#### Chi Tiết Score 40-70 → Fetch Medium/Low Intensity
+
+```python
+# Khi user score 40-70 cho video trong category X
+if 40 <= total_score < 70:
+    # 🎯 Strategy: Soft introduce category này
+    # Ưu tiên show medium intensity trước, rồi low
+    # → User sẽ dần quen với tag này mà ko mệt
+    
+    pipeline.append({
+        "$addFields": {
+            "intensity_rank": {
+                "$switch": {
+                    "branches": [
+                        {"case": {"$eq": ["$intensity_level", "low"]}, "then": 0},
+                        {"case": {"$eq": ["$intensity_level", "medium"]}, "then": 1},
+                        {"case": {"$eq": ["$intensity_level", "high"]}, "then": 2}
+                    ],
+                    "default": 100  # Push high intensity to bottom
+                }
+            }
+        }
+    })
+    pipeline.append({"$sort": {"intensity_rank": 1, "total_score": -1}})
+
+# Kết quả sort:
+# Rank 1: intensity=low, score=450
+# Rank 2: intensity=med, score=600
+# Rank 3: intensity=high, score=750
+```
+
+#### Chi Tiết Score 70+ → Claim + Rerank Tags
+
+```python
+elif total_score >= 70:
+    # 🏆 Strategy: STRONG relevance detected!
+    # User strongly interested in this tag/category
+    #
+    # Action:
+    # 1. CLAIM: Video này sẽ show trước cùng category
+    # 2. RERANK: Nhưng các video khác có user_favorite_tags
+    #    sẽ được đẩy xuống 2-3 rank để DIVERSIFY feed
+    
+    pipeline.append({
+        "$addFields": {
+            "tag_bias_penalty": {
+                # Nếu video này chứa tag user yêu thích quá nhiều
+                # Thêm penalty (slight nudge, không phải punishment)
+                "$cond": [
+                    {"$gte": [
+                        {"$size": {"$setIntersection": ["$tags", "$user_favorite_tags"]}},
+                        2  # Nếu >= 2 favorite tags
+                    ]},
+                    0.85,  # × 0.85 = 15% penalty (push down)
+                    1.0    # × 1.0 = no change
+                ]
+            },
+            "reranked_score": {
+                "$multiply": ["$total_score", "$tag_bias_penalty"]
+            }
+        }
+    })
+    pipeline.append({"$sort": {"reranked_score": -1}})
+    
+    # Example:
+    # Video A: total_score=850, tags=["nature", "forest", "hiking"]
+    #          user_favorite_tags=["forest", "hiking"] (2 matches!)
+    #          → reranked_score = 850 × 0.85 = 722.5 ↓ Push down
+    #
+    # Video B: total_score=800, tags=["nature", "travel"]
+    #          user_favorite_tags=["forest", "hiking"] (0 matches)
+    #          → reranked_score = 800 × 1.0 = 800 ↑ Rank up!
+    #
+    # Kết quả: Video B show trước video A
+    #          → Diversify: User thấy "travel" content mới
+    #             mà vẫn relevant trong "nature" category
+```
+
+**Mục đích Diversification:**
+- ✅ Tránh echo chamber (lặp lại cùng tag mãi mãi)
+- ✅ User khám phá nội dung mới nhưng vẫn relevant  
+- ✅ Balanced feed (tag A 3 videos, tag B 2 videos, tag C 1 video)
+- ✅ Prevent fatigue from over-exposure
+
+---
+
+### B. Công Thức EMA (Exponential Moving Average) - Cập Nhật Vector Sở Thích
+
+#### **V là gì? Vector 384 chiều!**
+
+**V** = **Vector embedding của user preference** (384 dimensions)
+
+```
+V_current = [0.12, 0.45, -0.23, 0.67, ..., -0.15]  ← 384 giá trị
+            ↑      ↑      ↑      ↑              ↑
+          chiều1 chiều2 chiều3 chiều4        chiều384
+          (sở    (sở    (sở    (sở            (sở
+           thích   thích   thích   thích         thích
+           topic1) topic2) topic3) topic4)      topic384)
+
+Model: HuggingFace BERT (pre-trained)
+Purpose: Semantic embedding - capture user preference in dense space
+Update: Dùng Exponential Moving Average (EMA) để evolve
+```
+
+#### Công Thức Chi Tiết
+
+$$\vec{V}_{new} = \vec{V}_{current} \times (1 - \alpha) + \vec{V}_{video} \times \alpha \times W_{action}$$
+
+**Giải thích từng thành phần:**
+
+| Thành Phần | Ý Nghĩa | Giá Trị |
+|---|---|---|
+| $\vec{V}_{new}$ | Vector sở thích người dùng **sau khi update** | 384 dims |
+| $\vec{V}_{current}$ | Vector sở thích người dùng **trước khi update** | 384 dims |
+| $(1 - \alpha)$ | % **giữ lại** sở thích cũ (inertia) | 0.80 (80%) |
+| $\alpha$ | % **adapt** theo hành vi mới | 0.20 (20%) |
+| $\vec{V}_{video}$ | Vector embedding của **video mới xem** | 384 dims |
+| $W_{action}$ | Trọng số hành vi người dùng | Xem bảng dưới |
+
+#### Trọng Số Hành Động (W_action)
+
+```python
+W_action = {
+    "like": +0.5,                    # ❤️  Thích video
+    "comment": +0.8,                # 💬 Bình luận (strongest signal!)
+    "skip": -0.3,                   # ⏭️  Vuốt qua ngay (negative!)
+    "watch_percentage_80%+": +0.8,  # ▶️  Xem lâu (engagement!)
+}
+
+# Auto-detection:
+if watch_percentage < 10%:
+    W_action = -0.3  # Tự động mark như "skip"
+if watch_percentage > 80%:
+    W_action = +0.8  # Tự động boost (supercharge!)
+```
+
+#### Ví Dụ Cụ Thể (1 chiều, để dễ hiểu)
+
+```
+Scenario: User xem video Nature + Like it
+
+Chiều được track: "Nature Content Preference"
+
+BEFORE:
+V_current[0] = 0.3   (User trước đó KHÔNG thích nature lắm)
+
+VIDEO WATCHED:
+V_video[0] = 0.9     (Video embedding: là "Nature" → 0.9)
+Action: Like
+W_action = +0.5      (Trọng số like)
+
+PARAMETERS:
+α = 0.20             (Tốc độ thích nghi 20%)
+
+CALCULATION:
+V_new[0] = 0.3 × (1 - 0.20) + 0.9 × 0.20 × (+0.5)
+         = 0.3 × 0.80 + 0.9 × 0.20 × 0.5
+         = 0.24 + 0.09
+         = 0.33
+
+RESULT:
+0.3 → 0.33 (↑ +3.3%)
+→ User bắt đầu thích nature hơn!
+```
+
+#### Timeline: 10 lần Like cùng Nature Videos
+
+```
+Session 1:  V_nature[0] = 0.30 (ban đầu, neutral)
+Session 2:  V_nature[0] = 0.33 (sau like lần 1)
+Session 3:  V_nature[0] = 0.36 (sau like lần 2)
+Session 4:  V_nature[0] = 0.39
+Session 5:  V_nature[0] = 0.42
+...
+Session 10: V_nature[0] = 0.56 (dần dần tăng)
+
+Asymptote: max ≈ 0.90 (không bao giờ vượt V_video)
+
+→ User đang dần dần trở thành "nature lover"
+```
+
+#### Visualize: EMA Update Loop
+
+```
+USER                    INTERACTION API         USER PROFILE DB
+  │                           │                        │
+  ├─ Xem video nature  ✓      │                        │
+  ├─ Like it            ✓     │                        │
+  └──────────────────────────→│ POST /interactions    │
+                              │                        │
+                              ├─ Extract V_video[0]=0.9│
+                              ├─ W_action=+0.5        │
+                              ├─ α=0.20               │
+                              └─→ Calculate V_new   ←─┤
+                                                       │
+        V_new[0] = 0.3 × 0.80 + 0.9 × 0.20 × 0.5       
+        V_new[0] = 0.33                                
+                                                       │
+        ┌─── Unit Normalize V_new ────────────────────┤
+        │  ||V_new|| = 1.0 (để cosine similarity ok)   │
+        │                                               │
+        └─────→ Save V_new to User Collection ────→ │
+                                                       │
+                              GET /feed    ←──────────────
+                              Use V_new = [0.33, ...]
+                              Run $vectorSearch
+                              Kết quả: Show nature videos trước!
+```
+
+#### 🔑 Key Insights
+
+| Aspect | Meaning |
+|---|---|
+| **α = 0.20** | User's taste changes **slowly** (20% adaptive, 80% inertia) |
+| **Không bao giờ reset** | Vector **evolves continuously**, không bao giờ quên |
+| **W_action = +0.8 (max)** | Comment > Like (deeper engagement = stronger signal) |
+| **W_action = -0.3** | Skip videos = negative signal (pull vector away) |
+| **Unit Normalization** | Sau mỗi update, $\|\|V_{new}\|\| = 1.0$ để cosine similarity chính xác |
+| **384 chiều** | HuggingFace BERT embedding (tất cả semantic features) |
+| **Converges slowly** | Không quá nhanh, nhưng cũng không quá chậm (balanced) |
+
+#### So Sánh các Hành Động
+
+```python
+# Scenario: User đã có V_current = 0.5 cho "sports"
+
+# Case 1: User Like video thể thao
+V_new = 0.5 × 0.80 + 0.9 × 0.20 × 0.5 = 0.4 + 0.09 = 0.49 → 0.5 (stable)
+
+# Case 2: User Comment video thể thao (deeper!)
+V_new = 0.5 × 0.80 + 0.9 × 0.20 × 0.8 = 0.4 + 0.144 = 0.544 (↑ more!)
+
+# Case 3: User Skip video thể thao (negative!)
+V_new = 0.5 × 0.80 + 0.9 × 0.20 × (-0.3) = 0.4 - 0.054 = 0.346 (↓ less!)
+
+→ Comment drives strongest update (W=0.8)
+→ Skip pushes away (negative W)
+```
+
+---
+
 ## 3. So Sánh Hiệu Năng (Benchmark): Cách Tĩnh vs. Cách Động
 
 Chúng tôi đã chạy benchmark trên **10.000 documents** để so sánh hai hướng tiếp cận:
