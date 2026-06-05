@@ -9,6 +9,7 @@ Provides:
   - start_producer() / stop_producer() lifecycle hooks
 """
 
+import asyncio
 import json
 import logging
 from typing import Optional
@@ -21,29 +22,41 @@ logger = logging.getLogger(__name__)
 
 # ── Module-level singleton ─────────────────────────────────────
 _producer: Optional[AIOKafkaProducer] = None
+_producer_lock = asyncio.Lock()
 
 
 # ══════════════════════════════════════════════════════════════
 # Producer
 # ══════════════════════════════════════════════════════════════
 
+async def get_producer() -> Optional[AIOKafkaProducer]:
+    """Get the active Kafka producer, initializing it if necessary."""
+    global _producer
+    if _producer is None:
+        async with _producer_lock:
+            if _producer is None:
+                try:
+                    prod = AIOKafkaProducer(
+                        bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
+                        value_serializer=lambda v: json.dumps(v).encode("utf-8"),
+                        # Ensure messages are durably written
+                        acks="all",
+                    )
+                    await prod.start()
+                    _producer = prod
+                    logger.info(
+                        "✅ Kafka producer initialized (bootstrap=%s)",
+                        settings.KAFKA_BOOTSTRAP_SERVERS,
+                    )
+                except Exception as exc:
+                    logger.error("❌ Failed to initialize Kafka producer: %s", exc)
+                    _producer = None
+    return _producer
+
+
 async def start_producer() -> None:
     """Initialise and start the Kafka producer (call once at app startup)."""
-    global _producer
-    if _producer is not None:
-        return
-
-    _producer = AIOKafkaProducer(
-        bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
-        value_serializer=lambda v: json.dumps(v).encode("utf-8"),
-        # Ensure messages are durably written
-        acks="all",
-    )
-    await _producer.start()
-    logger.info(
-        "✅ Kafka producer started (bootstrap=%s)",
-        settings.KAFKA_BOOTSTRAP_SERVERS,
-    )
+    await get_producer()
 
 
 async def stop_producer() -> None:
@@ -58,14 +71,13 @@ async def stop_producer() -> None:
 async def send_behavior_log(message: dict) -> None:
     """
     Produce a behavior-log message to the configured Kafka topic.
-
-    Raises if the producer has not been started yet.
     """
-    if _producer is None:
+    producer = await get_producer()
+    if producer is None:
         logger.error("Kafka producer not initialised — dropping message %s", message.get("log_id"))
         return
 
-    await _producer.send_and_wait(
+    await producer.send_and_wait(
         settings.KAFKA_BEHAVIOR_LOG_TOPIC,
         value=message,
     )
@@ -76,7 +88,8 @@ async def send_to_dlq(message: dict, error: str) -> None:
     """
     Forward a failed message to the dead-letter topic with error metadata.
     """
-    if _producer is None:
+    producer = await get_producer()
+    if producer is None:
         logger.error("Kafka producer not initialised — cannot send to DLQ")
         return
 
@@ -85,7 +98,7 @@ async def send_to_dlq(message: dict, error: str) -> None:
         "_dlq_error": error,
     }
     try:
-        await _producer.send_and_wait(
+        await producer.send_and_wait(
             settings.KAFKA_BEHAVIOR_LOG_DLQ_TOPIC,
             value=dlq_message,
         )

@@ -63,13 +63,15 @@ async def lifespan(app: FastAPI):
     start_scheduler()
 
     # ── Kafka ──────────────────────────────────────────────
+    # Try starting the producer early. If it fails, get_producer will retry lazily.
     try:
         await start_producer()
-        kafka_consumer_task = asyncio.create_task(run_behavior_log_consumer())
-        logger.info("✅ Kafka producer & consumer background task started")
     except Exception as exc:
-        kafka_consumer_task = None
-        logger.warning(f"⚠️ Kafka startup failed (app will run without Kafka): {exc}")
+        logger.warning(f"⚠️ Kafka producer early startup failed (will retry lazily): {exc}")
+
+    # Always start the consumer background task. It has its own connection retry loop.
+    kafka_consumer_task = asyncio.create_task(run_behavior_log_consumer())
+    logger.info("✅ Kafka consumer background task started")
 
     yield  # App is running
 
