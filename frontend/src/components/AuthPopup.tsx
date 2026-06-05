@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { X, ShieldAlert, Sparkles, User, LogOut, Key, Hash, Layers, Play, Check } from 'lucide-react';
-import { 
-  loginUser, 
-  registerUser, 
-  getUserVectorStatus, 
+import {
+  loginUser,
+  registerUser,
+  getUserVectorStatus,
   getSession
 } from '../api/client';
 import type { VectorStatusResponse, SessionResponse } from '../api/client';
@@ -19,24 +19,24 @@ interface AuthPopupProps {
 }
 
 const AVAILABLE_TAGS = [
-  { id: 'nature', label: '🌲 Thiên nhiên' },
-  { id: 'meditation', label: '🧘 Thiền & Thư giãn' },
-  { id: 'cooking', label: '🍳 Nấu ăn' },
-  { id: 'fitness', label: '🏋️ Sức khỏe' },
-  { id: 'gaming', label: '🎮 Gaming' },
-  { id: 'programming', label: '💻 Lập trình' },
-  { id: 'travel', label: '✈️ Du lịch' },
-  { id: 'dance', label: '💃 Nhạc & Nhảy' }
+  { id: 'nature', label: '🌲 nature' },
+  { id: 'meditation', label: '🧘 calming' },
+  { id: 'cooking', label: '🍳 cooking' },
+  { id: 'fitness', label: '🏋️ sport' },
+  { id: 'gaming', label: '🎮 gaming' },
+  { id: 'programming', label: '💻 education' },
+  { id: 'travel', label: '✈️ lifestyle' },
+  { id: 'dance', label: '💃 entertainment' }
 ];
 
-export const AuthPopup: React.FC<AuthPopupProps> = ({ 
-  isOpen, 
-  onClose, 
-  user, 
-  sessionId, 
-  onLoginSuccess, 
-  onRegisterSuccess, 
-  onLogout 
+export const AuthPopup: React.FC<AuthPopupProps> = ({
+  isOpen,
+  onClose,
+  user,
+  sessionId,
+  onLoginSuccess,
+  onRegisterSuccess,
+  onLogout
 }) => {
   const [tab, setTab] = useState<'login' | 'register'>('login');
   const [username, setUsername] = useState('');
@@ -54,7 +54,7 @@ export const AuthPopup: React.FC<AuthPopupProps> = ({
     if (user && isOpen) {
       setDiagLoading(true);
       setError(null);
-      
+
       // Fetch both vector status and session stats parallel
       Promise.all([
         getUserVectorStatus(user.id).catch(err => {
@@ -123,13 +123,13 @@ export const AuthPopup: React.FC<AuthPopupProps> = ({
   return (
     <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end justify-center transition-all duration-300">
       <div className="absolute inset-0" onClick={onClose} />
-      
+
       <div className="relative w-full max-w-md bg-zinc-900 border-t border-zinc-800 rounded-t-[32px] p-5 flex flex-col items-center gap-4 z-10 shadow-2xl animate-in slide-in-from-bottom duration-300 max-h-[90%] overflow-y-auto">
-        
+
         <div className="w-12 h-1 bg-zinc-700 rounded-full mb-1 shrink-0" />
-        
-        <button 
-          onClick={onClose} 
+
+        <button
+          onClick={onClose}
           className="absolute top-4 right-4 p-2 rounded-full hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors"
         >
           <X size={20} />
@@ -138,7 +138,7 @@ export const AuthPopup: React.FC<AuthPopupProps> = ({
         {user ? (
           /* Profile Mode */
           <div className="w-full flex flex-col gap-4">
-            
+
             {/* Header profile info */}
             <div className="flex items-center gap-3 bg-zinc-800/40 p-4 rounded-2xl border border-zinc-800/80">
               <div className="w-12 h-12 rounded-full bg-emerald-500 flex items-center justify-center text-zinc-950 text-xl font-bold uppercase">
@@ -234,7 +234,7 @@ export const AuthPopup: React.FC<AuthPopupProps> = ({
             </div>
 
             {/* Logout button */}
-            <button 
+            <button
               onClick={() => {
                 onLogout();
                 onClose();
@@ -248,7 +248,7 @@ export const AuthPopup: React.FC<AuthPopupProps> = ({
         ) : (
           /* Auth Form Mode */
           <div className="w-full flex flex-col gap-4">
-            
+
             {/* Logo and Intro */}
             <div className="text-center shrink-0">
               <div className="flex items-center justify-center gap-2 mb-1.5 text-emerald-400">
@@ -262,13 +262,13 @@ export const AuthPopup: React.FC<AuthPopupProps> = ({
 
             {/* Tabs toggle */}
             <div className="flex bg-zinc-950 p-1 rounded-xl border border-zinc-800/80">
-              <button 
+              <button
                 onClick={() => { setTab('login'); setError(null); }}
                 className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all ${tab === 'login' ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
               >
                 Đăng nhập
               </button>
-              <button 
+              <button
                 onClick={() => { setTab('register'); setError(null); }}
                 className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all ${tab === 'register' ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
               >
@@ -285,14 +285,14 @@ export const AuthPopup: React.FC<AuthPopupProps> = ({
 
             {/* Form */}
             <form onSubmit={handleAuthSubmit} className="flex flex-col gap-3.5">
-              
+
               {/* Username Input */}
               <div className="flex flex-col gap-1">
                 <label className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider px-1">Tên đăng nhập</label>
                 <div className="relative">
                   <User className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
                     placeholder="nhap_username_cua_ban"
@@ -307,8 +307,8 @@ export const AuthPopup: React.FC<AuthPopupProps> = ({
                 <label className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider px-1">Mật khẩu</label>
                 <div className="relative">
                   <Key className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
-                  <input 
-                    type="password" 
+                  <input
+                    type="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
@@ -334,11 +334,10 @@ export const AuthPopup: React.FC<AuthPopupProps> = ({
                           key={t.id}
                           type="button"
                           onClick={() => handleTagToggle(t.id)}
-                          className={`py-2 px-3 rounded-xl border text-[11px] text-left transition-all flex items-center justify-between font-medium ${
-                            isSelected 
-                              ? 'bg-emerald-500/10 border-emerald-500 text-emerald-300 font-semibold' 
-                              : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:border-zinc-750'
-                          }`}
+                          className={`py-2 px-3 rounded-xl border text-[11px] text-left transition-all flex items-center justify-between font-medium ${isSelected
+                            ? 'bg-emerald-500/10 border-emerald-500 text-emerald-300 font-semibold'
+                            : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:border-zinc-750'
+                            }`}
                         >
                           <span>{t.label}</span>
                           {isSelected && <Check size={12} className="text-emerald-400 shrink-0" />}
@@ -350,16 +349,15 @@ export const AuthPopup: React.FC<AuthPopupProps> = ({
               )}
 
               {/* Submit button */}
-              <button 
+              <button
                 type="submit"
                 disabled={loading || (tab === 'register' && selectedTags.length !== 2)}
-                className={`w-full mt-1.5 py-3 px-4 font-semibold rounded-xl flex items-center justify-center gap-2 transition-all text-xs ${
-                  loading 
-                    ? 'bg-zinc-850 text-zinc-600 cursor-not-allowed'
-                    : tab === 'register' && selectedTags.length !== 2
+                className={`w-full mt-1.5 py-3 px-4 font-semibold rounded-xl flex items-center justify-center gap-2 transition-all text-xs ${loading
+                  ? 'bg-zinc-850 text-zinc-600 cursor-not-allowed'
+                  : tab === 'register' && selectedTags.length !== 2
                     ? 'bg-zinc-850 text-zinc-500 cursor-not-allowed border border-zinc-800'
                     : 'bg-emerald-500 hover:bg-emerald-400 text-zinc-950 shadow-lg hover:shadow-emerald-500/10 hover:scale-[1.01] active:scale-95'
-                }`}
+                  }`}
               >
                 {loading ? 'Đang xử lý...' : tab === 'login' ? 'Đăng nhập ngay' : 'Đăng ký & Bắt đầu Session'}
                 <Play size={12} fill="currentColor" />
