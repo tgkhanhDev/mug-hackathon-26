@@ -53,9 +53,30 @@ echo "🔗 MinIO Public Endpoint: $MINIO_ENDPOINT_URL"
 
 # 5. Build production .env file
 echo "📝 Writing environment configurations to .env..."
+
+# Load existing .env to preserve values not passed via secrets
+if [ -f .env ]; then
+    # Extract existing MONGODB_URI if not passed from outside
+    EXISTING_MONGODB_URI=$(grep '^MONGODB_URI=' .env | cut -d'=' -f2- | tr -d '[:space:]')
+    EXISTING_JWT_SECRET=$(grep '^JWT_SECRET_KEY=' .env | cut -d'=' -f2-)
+    EXISTING_PEXELS=$(grep '^PEXELS_API_KEY=' .env | cut -d'=' -f2-)
+    EXISTING_OPENAI=$(grep '^OPENAI_API_KEY=' .env | cut -d'=' -f2-)
+fi
+
+# Use passed secrets, fall back to existing .env values, then defaults
+FINAL_MONGODB_URI="${MONGODB_URI:-$EXISTING_MONGODB_URI}"
+FINAL_PEXELS="${PEXELS_API_KEY:-$EXISTING_PEXELS}"
+FINAL_OPENAI="${OPENAI_API_KEY:-$EXISTING_OPENAI}"
+FINAL_JWT="${JWT_SECRET_KEY:-${EXISTING_JWT_SECRET:-$(openssl rand -hex 32 2>/dev/null || echo 'vps-default-secret-key-321-abc')}}"
+
+if [ -z "$FINAL_MONGODB_URI" ]; then
+    echo "❌ MONGODB_URI is not set. Provide it via GitHub Secret or existing .env"
+    exit 1
+fi
+
 cat <<EOF > .env
 # MongoDB Atlas
-MONGODB_URI=${MONGODB_URI}
+MONGODB_URI=${FINAL_MONGODB_URI}
 DATABASE_NAME=${DATABASE_NAME:-gotouchgrass}
 
 # S3 / MinIO Configuration
@@ -66,11 +87,11 @@ MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME:-gotouchgrass-media}
 MINIO_USE_SSL=${MINIO_USE_SSL:-False}
 
 # Crawler & AI APIs
-PEXELS_API_KEY=${PEXELS_API_KEY}
-OPENAI_API_KEY=${OPENAI_API_KEY}
+PEXELS_API_KEY=${FINAL_PEXELS}
+OPENAI_API_KEY=${FINAL_OPENAI}
 
 # JWT Auth Config
-JWT_SECRET_KEY=${JWT_SECRET_KEY:-$(openssl rand -hex 32 2>/dev/null || echo "vps-default-secret-key-321-abc")}
+JWT_SECRET_KEY=${FINAL_JWT}
 JWT_ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=60
 EOF
