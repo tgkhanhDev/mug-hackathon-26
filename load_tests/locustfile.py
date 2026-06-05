@@ -6,7 +6,7 @@ from locust import HttpUser, task, between, events
 users_pool = []
 videos_pool = []
 
-@events.test_start.connect
+@events.test_start.add_listener
 def on_test_start(environment, **kwargs):
     """
     Prefetch users and videos from the API to populate the load testing pool.
