@@ -84,19 +84,61 @@ export const Feed = forwardRef<FeedHandle, FeedProps>(({
     if (targetIndex === activeIndex) return;
 
     isProgrammaticScroll.current = true;
-    const speedVal = swipeTrigger.speed === 'fast' ? 950 : 150;
+    const isFast = swipeTrigger.speed === 'fast';
+    const speedVal = isFast ? 950 : 100; // Tốc độ càng thấp thì thuật toán backend càng tính là slow
     programmaticSpeed.current = speedVal;
     setSwipeSpeed(speedVal);
 
     const targetScrollTop = targetIndex * cardHeight;
-    container.scrollTo({ top: targetScrollTop, behavior: 'smooth' });
 
-    const timer = setTimeout(() => {
-      isProgrammaticScroll.current = false;
-      programmaticSpeed.current = null;
-    }, 600);
+    if (isFast) {
+      // Dùng cuộn mượt mặc định của trình duyệt (~300ms)
+      container.scrollTo({ top: targetScrollTop, behavior: 'smooth' });
+      
+      const timer = setTimeout(() => {
+        isProgrammaticScroll.current = false;
+        programmaticSpeed.current = null;
+      }, 600);
+      return () => clearTimeout(timer);
+    } else {
+      // Dùng requestAnimationFrame để cuộn chậm (vd: 1500ms)
+      const startTop = container.scrollTop;
+      const distance = targetScrollTop - startTop;
+      const duration = 1500; // 1.5 seconds cho slow swipe
+      let startTime: number | null = null;
+      let animationFrameId: number;
 
-    return () => clearTimeout(timer);
+      // Tạm tắt scroll snap để không bị giật khi đang animate
+      const originalSnap = container.style.scrollSnapType;
+      container.style.scrollSnapType = 'none';
+
+      const animateScroll = (timestamp: number) => {
+        if (!startTime) startTime = timestamp;
+        const elapsed = timestamp - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        
+        // Easing function (easeInOutQuad)
+        const easeProgress = progress < 0.5 ? 2 * progress * progress : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+        
+        container.scrollTop = startTop + distance * easeProgress;
+
+        if (progress < 1) {
+          animationFrameId = requestAnimationFrame(animateScroll);
+        } else {
+          // Hoàn thành animation
+          container.style.scrollSnapType = originalSnap;
+          isProgrammaticScroll.current = false;
+          programmaticSpeed.current = null;
+        }
+      };
+
+      animationFrameId = requestAnimationFrame(animateScroll);
+
+      return () => {
+        cancelAnimationFrame(animationFrameId);
+        container.style.scrollSnapType = originalSnap;
+      };
+    }
   }, [swipeTrigger]);
   const scrollStartTime = useRef<number | null>(null);
   const scrollStartTop = useRef<number | null>(null);
@@ -173,7 +215,7 @@ export const Feed = forwardRef<FeedHandle, FeedProps>(({
     <div
       ref={containerRef}
       onScroll={handleScroll}
-      className="w-full h-full overflow-y-scroll snap-y snap-mandatory no-scrollbar flex flex-col scroll-smooth"
+      className="w-full h-full overflow-y-scroll snap-y snap-mandatory no-scrollbar flex flex-col"
       style={{ scrollSnapType: 'y mandatory' }}
     >
       {videos.map((video, index) => (
