@@ -1,5 +1,6 @@
 import random
 import time
+import requests
 from locust import HttpUser, task, between, events
 
 # Shared pool of users and videos to simulate realistic loads
@@ -12,29 +13,30 @@ def on_test_start(environment, **kwargs):
     Prefetch users and videos from the API to populate the load testing pool.
     """
     print("🚀 Pre-fetching users and videos for load test...")
+    host = environment.host or "http://217.216.73.190"
     # Fetch up to 100 users
     try:
-        with environment.web_client.get("/api/v1/users?limit=100", timeout=10) as response:
-            if response.status_code == 200:
-                data = response.json()
-                for item in data.get("items", []):
-                    users_pool.append(item)
-                print(f"✓ Found {len(users_pool)} users in the pool.")
-            else:
-                print(f"❌ Failed to fetch users: {response.status_code}")
+        response = requests.get(f"{host}/api/v1/users?limit=100", timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            for item in data.get("items", []):
+                users_pool.append(item)
+            print(f"✓ Found {len(users_pool)} users in the pool.")
+        else:
+            print(f"❌ Failed to fetch users: {response.status_code}")
     except Exception as e:
         print(f"❌ Exception fetching users: {e}")
 
     # Fetch trending videos to use as interaction targets
     try:
-        with environment.web_client.get("/api/v1/videos/trending?limit=20", timeout=10) as response:
-            if response.status_code == 200:
-                data = response.json()
-                for item in data:
-                    videos_pool.append(item)
-                print(f"✓ Found {len(videos_pool)} videos in the pool.")
-            else:
-                print(f"❌ Failed to fetch trending videos: {response.status_code}")
+        response = requests.get(f"{host}/api/v1/videos/trending?limit=20", timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            for item in data:
+                videos_pool.append(item)
+            print(f"✓ Found {len(videos_pool)} videos in the pool.")
+        else:
+            print(f"❌ Failed to fetch trending videos: {response.status_code}")
     except Exception as e:
         print(f"❌ Exception fetching videos: {e}")
 
