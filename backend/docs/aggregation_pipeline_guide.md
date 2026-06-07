@@ -72,7 +72,7 @@ Pipeline lõi này kết hợp giữa **Atlas Vector Search** (độ tương đ�
 pipeline = [
     {
         "$vectorSearch": {
-            "index": "video_embedding_index",
+            "index": "video_embedding_index",ko
             "path": "embedding",
             "queryVector": query_vector,
             "numCandidates": vs_candidates,
