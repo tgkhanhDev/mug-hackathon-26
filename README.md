@@ -50,39 +50,7 @@ Short-form video platforms are designed to maximize engagement — but not user 
 
 ## 🏗 System Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Frontend (React 19 + Vite)              │
-│  ┌──────────┐  ┌───────────┐  ┌───────────────┐  ┌──────────┐  │
-│  │ Feed.tsx  │  │VideoCard  │  │ Analytics     │  │TouchGrass│  │
-│  │(Snap      │  │(Sliding   │  │ Dashboard     │  │ Modal    │  │
-│  │ Scroll)   │  │ Video)    │  │ (Sparkline)   │  │ (2-stage)│  │
-│  └────┬─────┘  └─────┬─────┘  └───────────────┘  └──────────┘  │
-│       │               │                                          │
-│  ┌────▼───────────────▼─────┐   ┌─────────────┐                 │
-│  │   Accumulate Algorithm   │   │  SSE Stream  │ ◄── Fatigue    │
-│  │   (Dedup + Batch Append) │   │  (Real-time) │     Updates    │
-│  └──────────┬───────────────┘   └──────┬──────┘                 │
-└─────────────┼──────────────────────────┼────────────────────────┘
-              │  REST API                │  EventSource
-              ▼                          ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    Backend (FastAPI + Uvicorn)                   │
-│  ┌──────────────┐  ┌──────────────┐  ┌────────────────────────┐ │
-│  │ Feed Service  │  │ Interaction  │  │  Formula Engine        │ │
-│  │ (Vector       │  │ Service      │  │  ├─ fatigue.py         │ │
-│  │  Search +     │  │ (Behavior    │  │  ├─ trending.py        │ │
-│  │  Rerank)      │  │  Logging)    │  │  └─ interest_vector.py │ │
-│  └──────┬───────┘  └──────┬───────┘  └────────────────────────┘ │
-│         │                  │                                     │
-│         ▼                  ▼                                     │
-│  ┌─────────────┐   ┌─────────────┐   ┌──────────┐              │
-│  │  MongoDB     │   │   Kafka     │   │  Redis   │              │
-│  │  Atlas       │   │  (KRaft)    │   │  (Dedup  │              │
-│  │  (Vector DB) │   │  (Log Buf.) │   │  + Cache)│              │
-│  └─────────────┘   └─────────────┘   └──────────┘              │
-└─────────────────────────────────────────────────────────────────┘
-```
+![System Architecture Diagram](./docs/assets/system_architecture.png)
 
 ---
 
